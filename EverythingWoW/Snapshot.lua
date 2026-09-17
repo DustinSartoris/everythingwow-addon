@@ -25,6 +25,27 @@ local ADDON_NAME, EW = ...
 EW.SNAPSHOT_SLOTS = 19
 EW.REPUTATION_CAP = 100
 EW.CURRENCY_CAP = 60
+--[[
+When a snapshot is taken, and why so few of them.
+
+The first live sample held two snapshots a hundred seconds apart, identical
+except for their currencies: the login one fired before the client had loaded
+the currency list, so it carried an empty list, and a second one was written
+soon after for no gain. One snapshot a session is the rule now.
+
+SNAPSHOT_LOGIN_DELAY is how long after entering the world the first attempt
+is made, and the attempt is repeated every SNAPSHOT_RETRY_SECONDS until the
+client answers with gear and currencies or SNAPSHOT_READY_TRIES attempts have
+passed, at which point it is taken anyway, because a level one character with
+an empty bag and no currencies is a real character and its snapshot is real.
+
+After that, another snapshot is written only on /ewow snapshot, or when at
+least SNAPSHOT_MIN_SECONDS have passed and the gear or the level has changed.
+]]
+EW.SNAPSHOT_LOGIN_DELAY = 10
+EW.SNAPSHOT_RETRY_SECONDS = 5
+EW.SNAPSHOT_READY_TRIES = 6
+EW.SNAPSHOT_MIN_SECONDS = 3600
 
 local function ItemString(link)
   if type(link) ~= "string" then return nil end
@@ -167,10 +188,59 @@ local function Currencies()
   return currencies
 end
 
+--[[ True once the client has answered with the things a snapshot is made of.
+     Gear is the first thing to arrive and the currency list the last, so both
+     are asked, and a character wearing nothing is not held back by the gear
+     half alone. ]]
+function EW.SnapshotReady()
+  local hasGear = false
+  for slot = 1, EW.SNAPSHOT_SLOTS do
+    local link
+    pcall(function() link = GetInventoryItemLink("player", slot) end)
+    if type(link) == "string" and link ~= "" then
+      hasGear = true
+      break
+    end
+  end
+
+  local currencyApi, hasCurrency = false, false
+  pcall(function()
+    if C_CurrencyInfo and C_CurrencyInfo.GetCurrencyListSize then
+      currencyApi = true
+      hasCurrency = (C_CurrencyInfo.GetCurrencyListSize() or 0) > 0
+    end
+  end)
+  if not currencyApi then return hasGear end
+  return hasGear and hasCurrency
+end
+
+--[[ The snapshot the session has already written, held in memory alone. ]]
+local last = { at = nil, level = nil, gear = nil }
+EW.snapshotState = last
+
+local function GearSignature(gear)
+  local parts = {}
+  for _, entry in ipairs(gear or {}) do
+    parts[#parts + 1] = tostring(entry.slot) .. ":" .. tostring(entry.item)
+  end
+  return table.concat(parts, "|")
+end
+
+--[[ Whether this snapshot is worth writing beside the one already held. ]]
+function EW.ShouldSnapshot(force, level, signature)
+  if force then return true end
+  if last.at == nil then return true end
+  if (EW.Now() - last.at) < EW.SNAPSHOT_MIN_SECONDS then return false end
+  if level ~= last.level then return true end
+  if signature ~= last.gear then return true end
+  return false
+end
+
 --[[ Takes the snapshot. The character's own name and realm are part of it,
      because the snapshot exists to enrich that character's page; no other
-     character and no other player appears anywhere in it. ]]
-function EW.TakeSnapshot()
+     character and no other player appears anywhere in it. UnitName is called
+     on "player" alone here, which is the contributor's own character. ]]
+function EW.TakeSnapshot(force)
   local payload = {}
   local ok = pcall(function()
     payload.name = UnitName("player")
@@ -185,25 +255,54 @@ function EW.TakeSnapshot()
   if not ok or not payload.name then return false end
 
   payload.gear = Gear()
+  local signature = GearSignature(payload.gear)
+  if not EW.ShouldSnapshot(force, payload.level, signature) then return false end
+
   payload.talents = RetailTalents() or ClassicTalents() or {}
   payload.professions = Professions()
   payload.reputations = Reputations()
   payload.currencies = Currencies()
 
   local mapId, x, y = EW.PlayerPosition()
-  return EW.Record("character_snapshot", "character", nil, mapId, x, y, payload)
+  local written = EW.Record("character_snapshot", "character", nil, mapId, x, y, payload)
+  if written then
+    last.at = EW.Now()
+    last.level = payload.level
+    last.gear = signature
+  end
+  return written
 end
 
-EW.RegisterEvent("PLAYER_ENTERING_WORLD", function(isLogin, isReload)
-  if isLogin == false and isReload == false then return end
-  -- The character sheet and the talent tree are not filled at the first
-  -- frame, so the snapshot waits a few seconds for them.
-  local ok, scheduled = pcall(function()
+--[[ The one login snapshot, once the client has the data to fill it. ]]
+local scheduled = false
+
+local function Attempt(try)
+  if EW.SnapshotReady() or try >= EW.SNAPSHOT_READY_TRIES then
+    pcall(EW.TakeSnapshot, false)
+    return
+  end
+  local ok = pcall(function()
+    C_Timer.After(EW.SNAPSHOT_RETRY_SECONDS, function() Attempt(try + 1) end)
+  end)
+  if not ok then pcall(EW.TakeSnapshot, false) end
+end
+
+function EW.ScheduleLoginSnapshot()
+  if scheduled then return false end
+  scheduled = true
+  local ok, timed = pcall(function()
     if C_Timer and C_Timer.After then
-      C_Timer.After(10, function() pcall(EW.TakeSnapshot) end)
+      C_Timer.After(EW.SNAPSHOT_LOGIN_DELAY, function() Attempt(1) end)
       return true
     end
     return false
   end)
-  if not (ok and scheduled) then pcall(EW.TakeSnapshot) end
+  -- A client with no timer takes it now and accepts what it has.
+  if not (ok and timed) then pcall(EW.TakeSnapshot, false) end
+  return true
+end
+
+EW.RegisterEvent("PLAYER_ENTERING_WORLD", function(isLogin, isReload)
+  if isLogin == false and isReload == false then return end
+  EW.ScheduleLoginSnapshot()
 end)

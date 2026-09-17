@@ -10,8 +10,9 @@ of an id. Two paths do yield a real id, and this file uses only those two:
 1. C_TooltipInfo.GetWorldCursor, which exists on Retail from the tooltip
    rework onward, returns tooltip data whose id field is the object's id for
    the object under the cursor. Where the function or the id is missing, the
-   sighting is skipped and counted in the saved file's skipped counter, which
-   /ewow status prints.
+   sighting is passed over and counted under ignored in the saved file, which
+   /ewow status prints by reason. Only an object that has an id the client
+   will not place is counted as skipped, because only that is a loss.
 2. A loot source GUID of type GameObject, which carries the object id in the
    same field a creature GUID carries the creature id. This is exact, and it
    is where most chest, herb, and vein sightings come from in practice,
@@ -44,7 +45,14 @@ function EW.RecordObjectFromGuid(guid, isNode)
   local subject, id = EW.SubjectFromGuid(guid)
   if subject ~= "object" or not id then return false end
   local mapId, x, y = EW.PlayerPosition()
-  if not mapId then return false end
+  if not mapId then
+    EW.CountSkipped("no_map")
+    return false
+  end
+  if x == nil or y == nil then
+    EW.CountSkipped("no_position")
+    return false
+  end
   local kind = "object"
   local subjectType = isNode and "node" or "object"
   return EW.Record(kind, subjectType, id, mapId, x, y, nil)
@@ -59,7 +67,12 @@ local function RecordCursorObject()
     end
   end)
   if not ok or type(data) ~= "table" then
-    EW.CountSkipped()
+    -- Either the client has no world cursor function, or the tooltip is over
+    -- something that is not in the world at all: a bag item, a unit frame, a
+    -- button. This is the common case by far and it is not a loss, so it is
+    -- counted under ignored. Version 0.1.0 counted it as skipped, which is
+    -- why a few minutes in a city reported hundreds of them.
+    EW.CountIgnored("no_world_cursor")
     return false
   end
 
@@ -67,7 +80,7 @@ local function RecordCursorObject()
   if not id or id <= 0 then
     -- No id can be read, so nothing is written. A guessed id is worse than a
     -- missing sighting, because the site would publish it as a pin.
-    EW.CountSkipped()
+    EW.CountIgnored("no_object_id")
     return false
   end
 
@@ -79,8 +92,16 @@ local function RecordCursorObject()
     end
   end
 
+  -- An object with an id the client will not place is a real loss.
   local mapId, x, y = EW.PlayerPosition()
-  if not mapId then return false end
+  if not mapId then
+    EW.CountSkipped("no_map")
+    return false
+  end
+  if x == nil or y == nil then
+    EW.CountSkipped("no_position")
+    return false
+  end
 
   local payload = nil
   if type(data.lines) == "table" and type(data.lines[1]) == "table" then

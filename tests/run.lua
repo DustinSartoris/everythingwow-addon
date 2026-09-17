@@ -66,7 +66,7 @@ _G.EverythingWoWDB = nil
 local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
-equal("addon is the addon version", saved.addon, "0.1.0")
+equal("addon is the addon version", saved.addon, "0.1.1")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -147,6 +147,34 @@ equal("a vendor item carries id", vendor.payload.items[1].id, 4001)
 equal("a vendor item carries price in copper", vendor.payload.items[1].price, 1001)
 equal("a vendor item carries the currency where there is one", vendor.payload.items[1].currency, 1166)
 check("the vendor payload is inside the four thousand byte cap", EW.JsonBytes(vendor.payload) <= 4000, EW.JsonBytes(vendor.payload))
+equal("a vendor item carries the currency amount", vendor.payload.items[1].currency_q, 1)
+
+-- The same window on a client that still has the positional global, which is
+-- the Classic Era shape. Retail has C_MerchantFrame.GetItemInfo and no global
+-- at all, and reading only the global is what wrote a live file with ids and
+-- no prices in 0.1.0.
+clear()
+stub.state.merchantApi = "legacy"
+stub.Fire("MERCHANT_SHOW")
+equal("the positional merchant api is read too", last().payload.items[1].price, 1001)
+equal("the positional merchant api gives the stack size", last().payload.items[2].q, nil)
+stub.state.merchantApi = "modern"
+
+-- An item bought with a currency: no copper price, an extended cost, and a
+-- currency that has to be recorded beside the zero rather than instead of it.
+clear()
+stub.state.merchant = {
+  { id = 210655, name = "Token Item", price = 0, costCount = 1, currency = 3008, currencyAmount = 25 },
+  { id = 210656, name = "Stack Item", price = 400, quantity = 5 },
+}
+stub.Fire("MERCHANT_SHOW")
+local extended = last().payload.items
+equal("a zero copper price is written and not dropped", extended[1].price, 0)
+equal("an extended cost records the currency", extended[1].currency, 3008)
+equal("an extended cost records how much of it", extended[1].currency_q, 25)
+equal("a copper price is still copper", extended[2].price, 400)
+equal("a stack of five is recorded", extended[2].q, 5)
+equal("an item bought with copper has no currency", extended[2].currency, nil)
 
 -- Loot, with a kill.
 clear()
@@ -193,22 +221,110 @@ equal("a node carries the node subject", node.subject, "node")
 equal("a node id comes from the guid", node.id, 1731)
 local skippedBefore = db().skipped
 EW.RecordCursorObject()
-equal("an object whose id cannot be read is skipped and counted", db().skipped, skippedBefore + 1)
+equal("a tooltip that is not a world object is not a skip", db().skipped, skippedBefore)
+equal("a tooltip that is not a world object is counted as ignored", db().ignores.no_world_cursor, 1)
 
--- The character snapshot.
+--[[
+What the three counters mean. The live 0.1.0 sample reported 802 skipped in a
+few minutes, which read as though the addon were losing sightings by the
+hundred; almost all of it was tooltips over bag items, nameplates on other
+players, and sightings the five minute window already held. Only a subject the
+addon could have placed and could not is a loss.
+]]
 clear()
+stub.state.units.nameplate2 = { guid = "Player-3888-0A1B2C40", name = "Someone", isPlayer = true }
+stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+equal("a nameplate on another player is not a skip", db().skipped, 0)
+equal("a nameplate on another player is counted as a player", db().ignores.player, 1)
+
+stub.state.units.pet = { guid = "Pet-0-3888-0-11-165189-0200136DFA", name = "Fluffy", playerControlled = true }
+stub.state.units.nameplate3 = { guid = "Pet-0-3888-0-11-165189-0200136DFA", name = "Fluffy", playerControlled = true }
+stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate3")
+equal("the player's own pet is not a skip", db().skipped, 0)
+equal("the player's own pet is counted as a pet", db().ignores.pet, 1)
+
+stub.state.units.nameplate4 = {
+  guid = "Vehicle-0-3888-0-11-32906-000136DFB1", name = "Someone's Chopper", playerControlled = true,
+}
+stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate4")
+equal("a player's vehicle is counted as a vehicle", db().ignores.vehicle, 1)
+
+stub.state.units.nameplate5 = {
+  guid = "Creature-0-3888-0-11-2914-000136DFB2", name = "Kobold Vermin", level = 3, reaction = 2,
+}
+stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate5")
+stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate5")
+equal("a sighting inside the window is deduped", db().dedupes.npc, 1)
+equal("a sighting inside the window is not a skip", db().skipped, 0)
+
+stub.state.position = nil
+stub.state.units.mouseover = { guid = "Creature-0-3888-0-11-4000-000136DFB3", name = "Placeless" }
+stub.Fire("UPDATE_MOUSEOVER_UNIT")
+equal("a creature the client will not place is the one real skip", db().skips.no_position, 1)
+equal("and it is the only skip", db().skipped, 1)
+stub.state.map = nil
+stub.state.units.mouseover = { guid = "Creature-0-3888-0-11-4001-000136DFB4", name = "Mapless" }
+stub.Fire("UPDATE_MOUSEOVER_UNIT")
+equal("a creature on no map is a skip with its own reason", db().skips.no_map, 1)
+stub.state.map = 84
+stub.state.position = { x = 0.4213, y = 0.6187 }
+
+stub.state.printed = {}
+EW.SlashCommand("status")
+local statusText = table.concat(stub.state.printed, "\n")
+check("status prints the skip reasons", statusText:find("no position", 1, true) ~= nil, statusText)
+check("status prints the dedupe count", statusText:find("deduped", 1, true) ~= nil, statusText)
+check("status prints the ignore reasons", statusText:find("player unit", 1, true) ~= nil, statusText)
+
+--[[
+The character snapshot, and when it is taken. The live 0.1.0 sample held two
+of them a hundred seconds apart, identical except that the first had an empty
+currency list because it fired before the client had loaded one. One snapshot
+a session on login, once the client answers, and after that only on demand or
+on a real change.
+]]
+clear()
+stub.state.inventory = {}
+stub.state.currencies = {}
+stub.Fire("PLAYER_ENTERING_WORLD", true, false)
+stub.RunTimers(1)
+equal("the login snapshot waits for a client with nothing loaded", #observations(), 0)
 stub.state.inventory = { [1] = 19019, [5] = 16963, [16] = 17182 }
+stub.state.currencies = {
+  { id = 1155, name = "Ancient Mana", quantity = 5 },
+  { id = 2032, name = "Trader's Tender", quantity = 4215 },
+}
+stub.RunTimers(1)
+equal("the login snapshot is written once the client answers", #observations(), 1)
+equal("the login snapshot carries the currencies", #last().payload.currencies, 2)
+equal("a currency carries its id", last().payload.currencies[1].id, 1155)
+stub.Fire("PLAYER_ENTERING_WORLD", false, true)
+stub.RunTimers()
+equal("a reload writes no second snapshot in the same session", #observations(), 1)
+equal("nothing changed, so no snapshot is written", EW.TakeSnapshot(), false)
+stub.state.time = stub.state.time + 3601
+equal("an hour later with nothing changed still writes nothing", EW.TakeSnapshot(), false)
+stub.state.units.player.level = 81
+equal("an hour later with a level gained writes one", EW.TakeSnapshot(), true)
+stub.state.time = stub.state.time + 3601
+stub.state.inventory[1] = 19020
+equal("an hour later with the gear changed writes one", EW.TakeSnapshot(), true)
+equal("the same again inside the hour writes nothing", EW.TakeSnapshot(), false)
+equal("the slash command takes one whenever it is asked", EW.TakeSnapshot(true), true)
+
+clear()
 stub.state.factions = {}
 for index = 1, 400 do
   stub.state.factions[index] = { id = 60 + index, name = "Faction " .. index, standing = 4, value = 2100 }
 end
-equal("a snapshot is recorded", EW.TakeSnapshot(), true)
+equal("a snapshot is recorded", EW.TakeSnapshot(true), true)
 local snapshot = last()
 equal("snapshot kind", snapshot.kind, "character_snapshot")
 equal("snapshot subject", snapshot.subject, "character")
 equal("snapshot has no subject id", snapshot.id, nil)
 equal("snapshot names the character", snapshot.payload.name, "Thalos")
-equal("gear is stored as an item string", snapshot.payload.gear[1].item, "item:19019:6229::::::::80:::::")
+equal("snapshot names the realm", snapshot.payload.realm, "Tichondrius")
+equal("gear is stored as an item string", snapshot.payload.gear[1].item, "item:19020:6229::::::::80:::::")
 check("no gear string carries a pipe", snapshot.payload.gear[1].item:find("|") == nil)
 check("reputations are capped", #snapshot.payload.reputations <= 100, #snapshot.payload.reputations)
 check("the snapshot payload is inside the sixty four thousand byte cap",
@@ -268,6 +384,47 @@ equal("clear empties the buffer", #observations(), 0)
 EW.SlashCommand("snapshot")
 equal("snapshot records one observation", #observations(), 1)
 equal("snapshot is the snapshot kind", last().kind, "character_snapshot")
+
+--[[
+The live capture from 0.1.0, anonymized.
+
+fixtures/live-0.1.0.lua is the file a Retail client wrote in a few minutes in
+Orgrimmar, with the character renamed and everything else left as it was: the
+same kinds, ids, map, and coordinates. It is kept because it is the evidence
+for the three fixes in 0.1.1, and these assertions are that evidence written
+down: a vendor row with no price, two snapshots in one short session with the
+first one's currency list empty, and 802 counted as skipped. Nothing in 0.1.1
+may write a file that looks like this again.
+]]
+local fixturePath = root .. "tests/fixtures/live-0.1.0.lua"
+local fixtureFile = io.open(fixturePath, "r")
+check("the live capture is kept with the tests", fixtureFile ~= nil, fixturePath)
+if fixtureFile then
+  local text = fixtureFile:read("a")
+  fixtureFile:close()
+  local env = {}
+  local chunk = assert(load(text, "live-0.1.0", "t", env))
+  chunk()
+  local captured = env.EverythingWoWDB
+  equal("the capture is the same schema", captured.schema, 1)
+  equal("the capture was written by 0.1.0", captured.addon, "0.1.0")
+  local kinds, vendorItem, snapshots = {}, nil, {}
+  for _, observation in ipairs(captured.observations) do
+    kinds[observation.kind] = (kinds[observation.kind] or 0) + 1
+    if observation.kind == "vendor" then vendorItem = observation.payload.items[1] end
+    if observation.kind == "character_snapshot" then snapshots[#snapshots + 1] = observation end
+  end
+  equal("the capture holds twenty two npc sightings", kinds.npc, 22)
+  equal("the capture holds one vendor visit", kinds.vendor, 1)
+  equal("0.1.0 wrote a vendor item with no price", vendorItem.price, nil)
+  equal("0.1.0 wrote a vendor item with no currency either", vendorItem.currency, nil)
+  equal("0.1.0 wrote two snapshots in one session", #snapshots, 2)
+  equal("the first one fired before the currencies loaded", #snapshots[1].payload.currencies, 0)
+  check("the second one was a hundred seconds later",
+    snapshots[2].t - snapshots[1].t < 3600, snapshots[2].t - snapshots[1].t)
+  equal("and 0.1.0 counted eight hundred and two as skipped", captured.skipped, 802)
+  equal("the capture carries no player but the contributor", snapshots[1].payload.name, "Thalos")
+end
 
 --[[
 The writer. The game serializes SavedVariables as one global assignment per
@@ -334,7 +491,7 @@ stub.state.units.target = { guid = "Creature-0-3888-0-11-2914-000136DF95" }
 stub.Fire("COMBAT_LOG_EVENT_UNFILTERED")
 stub.Fire("LOOT_OPENED")
 EW.RecordObjectFromGuid("GameObject-0-3888-0-11-1731-000136DF97", true)
-EW.TakeSnapshot()
+EW.TakeSnapshot(true)
 EW.OnAuctionListUpdate()
 
 local file = assert(io.open(outputPath, "w"))

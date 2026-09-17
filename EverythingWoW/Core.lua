@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.1.0"
+EW.ADDON_VERSION = "0.1.1"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -286,13 +286,56 @@ function EW.Database()
   if type(db.observations) ~= "table" then db.observations = {} end
   if type(db.dropped) ~= "number" then db.dropped = 0 end
   if type(db.skipped) ~= "number" then db.skipped = 0 end
+  if type(db.deduped) ~= "number" then db.deduped = 0 end
+  if type(db.ignored) ~= "number" then db.ignored = 0 end
+  if type(db.skips) ~= "table" then db.skips = {} end
+  if type(db.dedupes) ~= "table" then db.dedupes = {} end
+  if type(db.ignores) ~= "table" then db.ignores = {} end
   return db
 end
 
---[[ Counts a thing the addon saw and could not record honestly. ]]
-function EW.CountSkipped()
+--[[
+The three counters, and why there are three rather than one.
+
+Version 0.1.0 counted everything it did not write under skipped, so a few
+minutes in Orgrimmar reported 802 skipped when almost nothing had been lost:
+every tooltip over a bag item, every nameplate on another player, and every
+sighting already written inside the five minute window was counted the same
+way as a real loss. The three are now separated and each carries a reason, so
+/ewow status says what actually happened.
+
+skipped  A real loss: the addon had a subject id and could not place it,
+         because the client returned no map or no position for the player.
+         This is the only counter that means something went wrong.
+deduped  A sighting inside the five minute de-duplication window. Expected,
+         and the rule working.
+ignored  Something the addon saw and was never going to record: another
+         player, a pet, a vehicle, a tooltip that is not a world object. Also
+         expected, and never a loss.
+]]
+local function Count(field, table_, reason)
   local db = EW.Database()
-  db.skipped = db.skipped + 1
+  db[field] = (db[field] or 0) + 1
+  local counts = db[table_]
+  if type(counts) == "table" then
+    local key = tostring(reason or "unknown")
+    counts[key] = (counts[key] or 0) + 1
+  end
+end
+
+--[[ Counts a subject the addon could have recorded and could not place. ]]
+function EW.CountSkipped(reason)
+  Count("skipped", "skips", reason)
+end
+
+--[[ Counts a sighting the de-duplication window already holds. ]]
+function EW.CountDeduped(reason)
+  Count("deduped", "dedupes", reason)
+end
+
+--[[ Counts something the addon was never going to record. ]]
+function EW.CountIgnored(reason)
+  Count("ignored", "ignores", reason)
 end
 
 local function DedupeKey(kind, subject, id, map)
@@ -313,7 +356,11 @@ function EW.Record(kind, subject, id, map, x, y, payload)
   if DEDUPE_KINDS[kind] and id then
     local key = DedupeKey(kind, subject, id, map)
     local seen = lastSeen[key]
-    if seen and (now - seen) < EW.DEDUPE_SECONDS then return false end
+    if seen and (now - seen) < EW.DEDUPE_SECONDS then
+      -- The window holding a sighting back is the rule working, not a loss.
+      EW.CountDeduped(kind)
+      return false
+    end
     if lastSeen[key] == nil then lastSeenCount = lastSeenCount + 1 end
     lastSeen[key] = now
     -- The de-duplication memory is a session's, not a file's, so it is wiped
@@ -380,6 +427,32 @@ end)
 frame:RegisterEvent("ADDON_LOADED")
 
 --[[ The slash command. ]]
+--[[ The reasons in the order status prints them, so a reason a build stopped
+     using still prints if the saved file holds it. ]]
+local REASON_LABELS = {
+  no_id = "no id",
+  no_map = "no map",
+  no_position = "no position",
+  no_object_id = "tooltip with no object id",
+  no_world_cursor = "no world cursor on this client",
+  player = "player unit",
+  pet = "own pet",
+  vehicle = "vehicle",
+}
+
+local function ReasonLine(counts)
+  local keys = {}
+  for key in pairs(counts or {}) do keys[#keys + 1] = key end
+  table.sort(keys)
+  local parts = {}
+  for _, key in ipairs(keys) do
+    parts[#parts + 1] = string.format("%s %d", REASON_LABELS[key] or key, counts[key])
+  end
+  if #parts == 0 then return nil end
+  return table.concat(parts, ", ")
+end
+EW.ReasonLine = ReasonLine
+
 local function Status()
   local db = EW.Database()
   local counts = {}
@@ -387,10 +460,18 @@ local function Status()
     counts[observation.kind] = (counts[observation.kind] or 0) + 1
   end
   EW.Print(string.format("version %s, game %s, patch %s.", EW.ADDON_VERSION, tostring(db.version), tostring(db.patch)))
-  EW.Print(string.format("%d observations held, %d dropped, %d skipped.", #db.observations, db.dropped, db.skipped))
+  EW.Print(string.format("%d observations held, %d dropped.", #db.observations, db.dropped))
   for _, kind in ipairs(EW.KINDS) do
     if counts[kind] then EW.Print(string.format("  %s: %d", kind, counts[kind])) end
   end
+  EW.Print(string.format("%d skipped, %d deduped, %d ignored.", db.skipped, db.deduped, db.ignored))
+  local skips = ReasonLine(db.skips)
+  if skips then EW.Print("  skipped: " .. skips) end
+  local dedupes = ReasonLine(db.dedupes)
+  if dedupes then EW.Print("  deduped: " .. dedupes) end
+  local ignores = ReasonLine(db.ignores)
+  if ignores then EW.Print("  ignored: " .. ignores) end
+  EW.Print("Only skipped is a loss. Deduped and ignored are the addon working as it should.")
   EW.Print("Upload the file at https://everythingwow.com/addons/companion/upload")
 end
 
@@ -399,6 +480,11 @@ local function Clear()
   db.observations = {}
   db.dropped = 0
   db.skipped = 0
+  db.deduped = 0
+  db.ignored = 0
+  db.skips = {}
+  db.dedupes = {}
+  db.ignores = {}
   lastSeen = {}
   lastSeenCount = 0
   EW.Print("Cleared. Nothing recorded before now is still held.")

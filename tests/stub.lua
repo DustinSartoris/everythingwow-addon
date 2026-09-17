@@ -22,6 +22,9 @@ local function reset()
     lootSources = {},
     auction = {},
     inventory = {},
+    currencies = {},
+    timers = {},
+    merchantApi = "modern",
     printed = {},
     combatLog = nil,
     realm = "Tichondrius",
@@ -41,6 +44,20 @@ local function CreateFrame(_, name)
   function frame:HookScript(which, handler) self[which .. "_hook"] = handler end
   frames[#frames + 1] = frame
   return frame
+end
+
+--[[ Runs every timer the addon has queued, and any timer those queue in turn,
+     which is how the login snapshot's retry loop is driven in a test. ]]
+function stub.RunTimers(rounds)
+  for _ = 1, (rounds or 10) do
+    local pending = stub.state.timers
+    if #pending == 0 then return end
+    stub.state.timers = {}
+    for _, timer in ipairs(pending) do
+      stub.state.time = stub.state.time + math.floor(timer.delay or 0)
+      timer.callback()
+    end
+  end
 end
 
 function stub.Fire(event, ...)
@@ -82,7 +99,28 @@ function stub.Install(env)
     end,
   }
 
-  env.C_Timer = { After = function() end, NewTicker = function() end }
+  -- Timers are queued rather than run, so a test decides when the client's
+  -- clock would have reached them. stub.RunTimers drains the queue.
+  env.C_Timer = {
+    After = function(delay, callback)
+      table.insert(stub.state.timers, { delay = delay, callback = callback })
+    end,
+    NewTicker = function() end,
+  }
+
+  env.C_CurrencyInfo = {
+    GetCurrencyListSize = function() return #stub.state.currencies end,
+    GetCurrencyListInfo = function(index)
+      local row = stub.state.currencies[index]
+      if not row then return nil end
+      return { name = row.name, quantity = row.quantity, isHeader = false }
+    end,
+    GetCurrencyListLink = function(index)
+      local row = stub.state.currencies[index]
+      if not row then return nil end
+      return "|cffffffff|Hcurrency:" .. row.id .. "|h[" .. row.name .. "]|h|r"
+    end,
+  }
 
   local function unit(token) return stub.state.units[token] end
   env.UnitExists = function(token) return unit(token) ~= nil end
@@ -91,6 +129,11 @@ function stub.Install(env)
   env.UnitName = function(token) return (unit(token) or {}).name end
   env.UnitLevel = function(token) return (unit(token) or {}).level end
   env.UnitClassification = function(token) return (unit(token) or {}).classification end
+  env.UnitPlayerControlled = function(token) return (unit(token) or {}).playerControlled == true end
+  env.UnitIsUnit = function(first, second)
+    local one, two = unit(first), unit(second)
+    return one ~= nil and two ~= nil and one.guid == two.guid
+  end
   env.UnitReaction = function(_, token) return (unit(token) or {}).reaction end
   env.UnitClass = function() return "Shaman", "SHAMAN" end
   env.UnitRace = function() return "Orc", "Orc" end
@@ -103,10 +146,31 @@ function stub.Install(env)
   env.GetTitleText = function() return stub.state.questTitle end
 
   env.GetMerchantNumItems = function() return #stub.state.merchant end
+  -- Retail has C_MerchantFrame.GetItemInfo and no GetMerchantItemInfo global;
+  -- Classic Era has the global and no C_MerchantFrame. stub.state.merchantApi
+  -- says which client this is, so both paths are driven by the tests.
+  env.C_MerchantFrame = {
+    GetItemInfo = function(index)
+      if stub.state.merchantApi ~= "modern" then return nil end
+      local row = stub.state.merchant[index]
+      if not row then return nil end
+      return {
+        name = row.name,
+        texture = nil,
+        price = row.price,
+        stackCount = row.quantity or 1,
+        numAvailable = -1,
+        isPurchasable = true,
+        isUsable = true,
+        hasExtendedCost = (row.costCount or 0) > 0,
+      }
+    end,
+  }
   env.GetMerchantItemInfo = function(index)
+    if stub.state.merchantApi ~= "legacy" then return nil end
     local row = stub.state.merchant[index]
     if not row then return nil end
-    return row.name, nil, row.price, row.quantity or 1
+    return row.name, nil, row.price, row.quantity or 1, -1, true, true, (row.costCount or 0) > 0
   end
   env.GetMerchantItemLink = function(index)
     local row = stub.state.merchant[index]
@@ -120,7 +184,8 @@ function stub.Install(env)
   env.GetMerchantItemCostItem = function(index)
     local row = stub.state.merchant[index]
     if not row or not row.currency then return nil end
-    return nil, 1, "|cffffffff|Hcurrency:" .. row.currency .. "|h[Token]|h|r"
+    -- itemTexture, itemValue, itemLink, currencyName
+    return nil, row.currencyAmount or 1, "|cffffffff|Hcurrency:" .. row.currency .. "|h[Token]|h|r", "Token"
   end
 
   env.GetNumLootItems = function() return #stub.state.loot end

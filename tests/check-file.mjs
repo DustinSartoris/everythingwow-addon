@@ -11,6 +11,9 @@
  * Usage, from the repository root:
  *
  *   node addon/tests/check-file.mjs <file> [app clone] [git ref]
+ *
+ * The file is any file the addon wrote: the one addon/tests/run.lua writes, or
+ * the anonymized live capture in addon/tests/fixtures/live-0.1.0.lua.
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -72,7 +75,11 @@ if (!result.ok) {
 
 const file = result.file;
 check("the version key is read", /^[a-z_]{1,32}$/.test(file.version), file.version);
-check("the addon version is read", file.addon === "0.1.0", file.addon);
+check(
+  "the addon version is read",
+  typeof file.addon === "string" && /^\d+\.\d+\.\d+$/.test(file.addon),
+  file.addon,
+);
 check("the patch is read", typeof file.patch === "string" && file.patch.length > 0, file.patch);
 check("nothing in the file is dropped", file.dropped === 0, file.dropped);
 check("observations are read", file.observations.length > 0, file.observations.length);
@@ -111,24 +118,39 @@ check(
 );
 
 const loot = file.observations.find((observation) => observation.kind === "loot");
-check("a loot observation is read", loot !== undefined);
-check("loot items are spelled items", Array.isArray(loot?.payload?.items), JSON.stringify(loot?.payload)?.slice(0, 120));
-check("a loot item id is spelled id", typeof loot?.payload?.items?.[0]?.id === "number");
-check("the loot source type is spelled source_type", loot?.payload?.source_type === "npc");
-check("the loot source id is spelled source_id", typeof loot?.payload?.source_id === "number");
-
 const vendor = file.observations.find((observation) => observation.kind === "vendor");
-check("a vendor observation is read", vendor !== undefined);
-check("vendor items are spelled items", Array.isArray(vendor?.payload?.items));
-check("a vendor item id is spelled id", typeof vendor?.payload?.items?.[0]?.id === "number");
-check("a vendor price is spelled price", typeof vendor?.payload?.items?.[0]?.price === "number");
-
 const snapshot = file.observations.find((observation) => observation.kind === "character_snapshot");
-check("a character snapshot is read", snapshot !== undefined);
-check(
-  "the snapshot payload is inside its own cap",
-  new TextEncoder().encode(JSON.stringify(snapshot?.payload ?? null)).length <= 64_000,
-);
+const object = file.observations.find((observation) => observation.kind === "object");
+
+// A file the game wrote holds whatever the player did, so a kind that is not
+// in it is reported as absent rather than failed. The addon's own test file
+// holds every kind, so nothing here is skipped for it.
+const missing = [];
+const present = (name, value) => {
+  if (value !== undefined) return true;
+  missing.push(name);
+  return false;
+};
+
+if (present("loot", loot)) {
+  check("loot items are spelled items", Array.isArray(loot?.payload?.items), JSON.stringify(loot?.payload)?.slice(0, 120));
+  check("a loot item id is spelled id", typeof loot?.payload?.items?.[0]?.id === "number");
+  check("the loot source type is spelled source_type", loot?.payload?.source_type === "npc");
+  check("the loot source id is spelled source_id", typeof loot?.payload?.source_id === "number");
+}
+
+if (present("vendor", vendor)) {
+  check("vendor items are spelled items", Array.isArray(vendor?.payload?.items));
+  check("a vendor item id is spelled id", typeof vendor?.payload?.items?.[0]?.id === "number");
+  check("a vendor price is spelled price", typeof vendor?.payload?.items?.[0]?.price === "number");
+}
+
+if (present("character_snapshot", snapshot)) {
+  check(
+    "the snapshot payload is inside its own cap",
+    new TextEncoder().encode(JSON.stringify(snapshot?.payload ?? null)).length <= 64_000,
+  );
+}
 
 // The other half of the round trip: the worker's own aggregation readers.
 // The same file has to be legible to them, because they are what turns these
@@ -162,20 +184,38 @@ const asRow = (observation) => ({
   trust_score: null,
 });
 
-const lootRow = asRow(loot);
-check("the worker reads the loot item ids", aggregator.lootItemIds(lootRow.payload).length > 0);
-check("the worker reads the loot source", aggregator.lootSource(lootRow)?.source_type === "npc");
-check(
-  "the worker reads the loot source id",
-  aggregator.lootSource(lootRow)?.source_id === loot.payload.source_id,
+if (loot !== undefined) {
+  const lootRow = asRow(loot);
+  check("the worker reads the loot item ids", aggregator.lootItemIds(lootRow.payload).length > 0);
+  check("the worker reads the loot source", aggregator.lootSource(lootRow)?.source_type === "npc");
+  check(
+    "the worker reads the loot source id",
+    aggregator.lootSource(lootRow)?.source_id === loot.payload.source_id,
+  );
+}
+if (vendor !== undefined) {
+  const vendorLines = aggregator.vendorItems(asRow(vendor).payload);
+  check("the worker reads the vendor lines", vendorLines.length > 0, vendorLines.length);
+  check("the worker reads a vendor price in copper", typeof vendorLines[0]?.price === "number");
+  check("the worker reads a vendor currency where there is one", vendorLines[0]?.currency !== undefined);
+}
+if (npc !== undefined) {
+  check("the worker takes the npc sighting as a pin", aggregator.isPinEligible(asRow(npc)) === true);
+}
+if (present("object", object)) {
+  check("the worker takes the node sighting as a pin", aggregator.isPinEligible(asRow(object)) === true);
+}
+
+// What the site would publish from this file on its own: a pin needs two
+// account backed contributors or one trusted one, so one file publishes
+// nothing until a second contributor agrees.
+const pinnable = file.observations.filter((observation) => aggregator.isPinEligible(asRow(observation)));
+console.log(
+  `${pinnable.length} of ${file.observations.length} observations are pin eligible; ` +
+    `one contributor is below the gate of ${aggregator.PIN_GATE_CONTRIBUTORS} account backed contributors ` +
+    `(or one at trust ${aggregator.PIN_GATE_TRUST}), so nothing is published from this file alone.`,
 );
-const vendorLines = aggregator.vendorItems(asRow(vendor).payload);
-check("the worker reads the vendor lines", vendorLines.length > 0, vendorLines.length);
-check("the worker reads a vendor price in copper", typeof vendorLines[0]?.price === "number");
-check("the worker reads a vendor currency where there is one", vendorLines[0]?.currency !== undefined);
-check("the worker takes the npc sighting as a pin", aggregator.isPinEligible(asRow(npc)) === true);
-const object = file.observations.find((observation) => observation.kind === "object");
-check("the worker takes the node sighting as a pin", aggregator.isPinEligible(asRow(object)) === true);
+if (missing.length > 0) console.log(`Not in this file: ${missing.join(", ")}.`);
 
 const summary = summarize(file.observations);
 console.log(
