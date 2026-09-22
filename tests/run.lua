@@ -84,7 +84,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.1")
+equal("addon is the addon version", saved.addon, "0.2.2")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -229,6 +229,22 @@ equal("an unlooted kill is one loot observation", unlooted.kind, "loot")
 equal("an unlooted kill holds no items", #unlooted.payload.items, 0)
 equal("an unlooted kill still counts one kill", unlooted.payload.kills, 1)
 
+-- 0.2.2: a loot window whose slot carries no source guid at all, which
+-- GetLootSourceInfo returning nothing for a slot always looks like on every
+-- client, not only a combatLog-off one. The items are still recorded rather
+-- than thrown away, with the source marked unknown.
+clear()
+stub.state.loot = { { id = 2591, quantity = 3 } }
+stub.Fire("LOOT_OPENED")
+local unknownSource = last()
+equal("an unplaceable loot source is still recorded, not dropped", unknownSource.kind, "loot")
+equal("its subject is marked unknown rather than npc or object", unknownSource.subject, "unknown")
+equal("it has no subject id to guess at", unknownSource.id, nil)
+equal("its item is still held", unknownSource.payload.items[1].id, 2591)
+equal("its item quantity is still held", unknownSource.payload.items[1].q, 3)
+equal("its payload also marks the source unknown", unknownSource.payload.source_type, "unknown")
+equal("it still counts as one opening", unknownSource.payload.kills, 1)
+
 -- Objects and nodes.
 clear()
 equal("an object id read from a game object guid is exact",
@@ -351,6 +367,7 @@ check("professions are read", #snapshot.payload.professions > 0)
 
 -- The auction recorder.
 clear()
+equal("auction is on for this fresh retail instance", EW.Caps.auction, true)
 stub.state.auction = {}
 for index = 1, 120 do
   stub.state.auction[index] = { id = 2447, count = 5, buyout = 5000 + index }
@@ -418,6 +435,7 @@ equal("retail reads as the retail client", retailGate.Client.key, "retail")
 equal("retail's world cursor capability is on", retailGate.Caps.worldCursor, true)
 equal("retail's unit guid capability is on", retailGate.Caps.unitGuid, true)
 equal("retail's combat log capability is on", retailGate.Caps.combatLog, true)
+equal("retail's auction capability is on", retailGate.Caps.auction, true)
 check("retail installs the tooltip hook", _G.GameTooltip.OnShow ~= nil)
 
 _G.GameTooltip.OnShow = nil
@@ -426,42 +444,76 @@ equal("a 1.15 build reads as classic era", classicGate.Client.key, "classic_era"
 equal("classic era's world cursor capability is off", classicGate.Caps.worldCursor, false)
 equal("classic era's unit guid capability is on", classicGate.Caps.unitGuid, true)
 equal("classic era's combat log capability is on", classicGate.Caps.combatLog, true)
+equal("classic era's auction capability is on, its own scan being the only path", classicGate.Caps.auction, true)
 check("classic era never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
 
 _G.GameTooltip.OnShow = nil
 -- Build 1.60.1 is the owner's own reading, on what the note expects to be
--- the shared Classic project id.
+-- the shared Classic project id. 0.2.2 settles this row on the owner's own
+-- probe transcript: NAME_PLATE_UNIT_ADDED, UPDATE_MOUSEOVER_UNIT, and
+-- PLAYER_TARGET_CHANGED came back allowed and a manual /ewow cap on for
+-- worldCursor and unitGuid raised no alert, while COMBAT_LOG_EVENT_UNFILTERED
+-- and AUCTION_ITEM_LIST_UPDATE came back refused.
 local foreverGate = LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
 equal("a 1.60 build on the classic project id reads as forever", foreverGate.Client.key, "forever")
-equal("forever's world cursor capability defaults off", foreverGate.Caps.worldCursor, false)
-equal("forever's unit guid capability defaults off", foreverGate.Caps.unitGuid, false)
-equal("forever's combat log capability defaults off", foreverGate.Caps.combatLog, false)
-check("forever never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+equal("forever's world cursor capability defaults on, from the owner's probe",
+  foreverGate.Caps.worldCursor, true)
+equal("forever's unit guid capability defaults on, from the owner's probe",
+  foreverGate.Caps.unitGuid, true)
+equal("forever's combat log capability defaults off, the probe having refused it",
+  foreverGate.Caps.combatLog, false)
+equal("forever's auction capability defaults off, the probe having refused it too",
+  foreverGate.Caps.auction, false)
+check("forever installs the tooltip hook, world cursor now defaulting on",
+  _G.GameTooltip.OnShow ~= nil)
 
--- Firing every gated event on the Forever instance writes no observation and
--- raises no error, because the capability is checked before the client is
--- ever asked anything, not after.
+-- Firing a nameplate event on Forever now writes an npc observation, because
+-- unitGuid defaults on there since 0.2.2. The combat log and auction
+-- listeners are still never registered at all, because their capabilities
+-- default off, and the capability is checked before the client is ever
+-- asked anything, not after.
 do
   stub.state.units.nameplate1 = {
     guid = "Creature-0-3888-0-11-2914-000136DF91", name = "Kobold Vermin",
     level = 3, reaction = 2,
   }
   stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
-  equal("a gated guid reader writes no npc observation on forever",
-    #foreverGate.Database().observations, 0)
-  equal("a gated guid reader is counted as no id, not as a skip",
-    foreverGate.Database().skipped, 0)
+  equal("unit guid being on for forever writes an npc observation",
+    #foreverGate.Database().observations, 1)
+  equal("the observation is attributed to the right creature id",
+    foreverGate.Database().observations[1].id, 2914)
+  equal("nothing is skipped for it", foreverGate.Database().skipped, 0)
 
   stub.state.units.target = { guid = "Creature-0-3888-0-11-2914-000136DF91" }
   stub.state.combatLog = { subevent = "UNIT_DIED", destGuid = "Creature-0-3888-0-11-2914-000136DF91" }
   stub.Fire("COMBAT_LOG_EVENT_UNFILTERED")
-  equal("the combat log listener is never registered on forever",
-    #foreverGate.Database().observations, 0)
+  equal("the combat log listener is still never registered on forever",
+    #foreverGate.Database().observations, 1)
+
+  stub.Fire("AUCTION_ITEM_LIST_UPDATE")
+  equal("the auction listener is never registered on forever either",
+    #foreverGate.Database().observations, 1)
 
   local before = foreverGate.Database().ignored
-  equal("the world cursor path refuses without calling the client", foreverGate.RecordCursorObject(), false)
-  equal("and it is counted as ignored, the same reason as no world cursor at all",
+  equal("the world cursor path returns false where the stub gives no client function",
+    foreverGate.RecordCursorObject(), false)
+  equal("and it is counted as ignored either way",
     foreverGate.Database().ignored, before + 1)
+end
+
+-- 0.2.2: with auction off, Auction.lua registers no AUCTION_ITEM_LIST_UPDATE
+-- listener at all, and instead announces once, at the next
+-- PLAYER_ENTERING_WORLD, that the auction recorder is idle.
+do
+  stub.state.printed = {}
+  stub.Fire("PLAYER_ENTERING_WORLD", false, true)
+  local text = table.concat(stub.state.printed, "\n")
+  check("the idle auction recorder announces itself once at login",
+    text:find("Auction recording is off", 1, true) ~= nil, text)
+  stub.state.printed = {}
+  stub.Fire("PLAYER_ENTERING_WORLD", false, true)
+  equal("it does not announce itself a second time in the same session",
+    #stub.state.printed, 0)
 end
 
 --[[
@@ -514,10 +566,11 @@ do
   equal("classic era's world cursor capability starts off, as always",
     secondGate.Caps.worldCursor, false)
   check("classic era's other capabilities start on",
-    secondGate.Caps.unitGuid and secondGate.Caps.combatLog)
+    secondGate.Caps.unitGuid and secondGate.Caps.combatLog and secondGate.Caps.auction)
   stub.Fire("ADDON_ACTION_BLOCKED", "EverythingWoW")
   check("a report naming no function turns every capability off",
-    not secondGate.Caps.unitGuid and not secondGate.Caps.combatLog and not secondGate.Caps.worldCursor)
+    not secondGate.Caps.unitGuid and not secondGate.Caps.combatLog
+      and not secondGate.Caps.worldCursor and not secondGate.Caps.auction)
   equal("the record still holds, with no function name",
     secondGate.Database().lastForbidden.fn, nil)
   equal("the record still names the event", secondGate.Database().lastForbidden.event, "ADDON_ACTION_BLOCKED")
@@ -531,6 +584,7 @@ equal("an unreadable client is the unknown key", unknownGate.Client.key, "unknow
 equal("an unknown client defaults the world cursor capability off", unknownGate.Caps.worldCursor, false)
 equal("an unknown client defaults the unit guid capability off", unknownGate.Caps.unitGuid, false)
 equal("an unknown client defaults the combat log capability off", unknownGate.Caps.combatLog, false)
+equal("an unknown client defaults the auction capability off", unknownGate.Caps.auction, false)
 check("an unknown client never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
 
 --[[
@@ -539,20 +593,25 @@ asked, because the owner's own build 1.60.1 session carried the mainline
 project id, the same one Retail reports, not the Classic id 0.2.0 expected
 Forever to share. A project id check run ahead of the version string, the
 way 0.2.0 ran it, reads this exact session as Retail and switches every
-capability back on, which is the misclassification 0.2.1 fixes.
+capability back on, which is the misclassification 0.2.1 fixes. The
+capability values themselves are 0.2.2's settled profile, the same as
+foreverGate above; this only proves the client key itself is unaffected by
+which project id the mainline reading carries.
 ]]
 _G.GameTooltip.OnShow = nil
 local foreverOnMainline = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
 equal("a 1.60 build on the mainline project id still reads as forever",
   foreverOnMainline.Client.key, "forever")
-equal("forever's world cursor capability defaults off on the mainline project id too",
-  foreverOnMainline.Caps.worldCursor, false)
-equal("forever's unit guid capability defaults off on the mainline project id too",
-  foreverOnMainline.Caps.unitGuid, false)
+equal("forever's world cursor capability is on on the mainline project id too",
+  foreverOnMainline.Caps.worldCursor, true)
+equal("forever's unit guid capability is on on the mainline project id too",
+  foreverOnMainline.Caps.unitGuid, true)
 equal("forever's combat log capability defaults off on the mainline project id too",
   foreverOnMainline.Caps.combatLog, false)
-check("forever on the mainline project id never installs the tooltip hook",
-  _G.GameTooltip.OnShow == nil)
+equal("forever's auction capability defaults off on the mainline project id too",
+  foreverOnMainline.Caps.auction, false)
+check("forever on the mainline project id installs the tooltip hook too",
+  _G.GameTooltip.OnShow ~= nil)
 
 --[[
 Attributing a RegisterEvent refusal to the exact event being registered,
@@ -585,6 +644,8 @@ do
     attributionGate.Caps.worldCursor, true)
   equal("a second unrelated capability is also left on",
     attributionGate.Caps.combatLog, true)
+  equal("a third unrelated capability is also left on",
+    attributionGate.Caps.auction, true)
 end
 
 --[[
@@ -623,6 +684,122 @@ do
   check("the saved probe holds the refused event's own result",
     combatLogResult ~= nil and combatLogResult.allowed == false)
   stub.state.forbiddenEvents = {}
+end
+
+--[[
+0.2.2: the owner's own Forever probe transcript, reproduced. Combat log and
+auction are both refused, which is what the owner's own build 1.60.1 session
+showed for COMBAT_LOG_EVENT_UNFILTERED and AUCTION_ITEM_LIST_UPDATE.
+0.2.1's probe called frame:UnregisterEvent unconditionally after a refused
+RegisterEvent, and the owner's own transcript showed the client also
+forbidding that call, naming "EverythingWoWFrame:UnregisterEvent()" with
+EW.lastRegisterAttempt already cleared, so 0.2.1's handler could not place
+it and fell back to turning every restricted capability off, worldCursor and
+unitGuid included, on a client where the owner had proven both of those
+safe. This proves the fix: a refused registration is never followed by an
+unregister call at all, so no second forbidden report ever fires, and
+worldCursor and unitGuid come through the probe exactly where the Forever
+profile default put them.
+]]
+do
+  _G.GameTooltip.OnShow = nil
+  stub.state.forbiddenEvents = { COMBAT_LOG_EVENT_UNFILTERED = true, AUCTION_ITEM_LIST_UPDATE = true }
+  local ownerGate = LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  equal("the owner's own session reads as forever", ownerGate.Client.key, "forever")
+  equal("world cursor starts on for forever", ownerGate.Caps.worldCursor, true)
+  equal("unit guid starts on for forever", ownerGate.Caps.unitGuid, true)
+  equal("combat log is already off, never being registered at load",
+    ownerGate.Caps.combatLog, false)
+  equal("auction is already off, never being registered at load",
+    ownerGate.Caps.auction, false)
+
+  stub.state.printed = {}
+  ownerGate.SlashCommand("probe")
+  stub.RunTimers(#ownerGate.PROBE_EVENTS + 5)
+  local text = table.concat(stub.state.printed, "\n")
+
+  check("the probe never reports a forbidden UnregisterEvent call",
+    text:find("UnregisterEvent", 1, true) == nil, text)
+  check("the probe reports combat log refused",
+    text:find("COMBAT_LOG_EVENT_UNFILTERED: refused", 1, true) ~= nil, text)
+  check("the probe reports auction refused",
+    text:find("AUCTION_ITEM_LIST_UPDATE: refused", 1, true) ~= nil, text)
+  check("the probe still tallies all twelve events, ten allowed and two refused",
+    text:find("10 allowed, 2 refused", 1, true) ~= nil, text)
+
+  equal("world cursor survives the probe, unlike the owner's own 0.2.1 session",
+    ownerGate.Caps.worldCursor, true)
+  equal("unit guid survives the probe too", ownerGate.Caps.unitGuid, true)
+  equal("combat log stays off", ownerGate.Caps.combatLog, false)
+  equal("auction stays off", ownerGate.Caps.auction, false)
+
+  equal("a refused combat log registration is never followed by an unregister call",
+    stub.state.unregisterAttempts["COMBAT_LOG_EVENT_UNFILTERED"], nil)
+  equal("the same is true for the refused auction registration",
+    stub.state.unregisterAttempts["AUCTION_ITEM_LIST_UPDATE"], nil)
+
+  local ownerForbidden = ownerGate.Database().forbidden
+  local combatLogReports, auctionReports = 0, 0
+  for _, record in ipairs(ownerForbidden) do
+    if record.attemptedEvent == "COMBAT_LOG_EVENT_UNFILTERED" then combatLogReports = combatLogReports + 1 end
+    if record.attemptedEvent == "AUCTION_ITEM_LIST_UPDATE" then auctionReports = auctionReports + 1 end
+  end
+  equal("the combat log refusal is reported exactly once, not once more for a phantom unregister",
+    combatLogReports, 1)
+  equal("the same is true for the auction refusal",
+    auctionReports, 1)
+
+  local ownerProbe = ownerGate.Database().probe
+  check("the probe result is saved", ownerProbe ~= nil)
+  equal("the tally counts every probed event exactly once",
+    ownerProbe and #ownerProbe.results, #ownerGate.PROBE_EVENTS)
+  local seen, duplicate = {}, false
+  for _, result in ipairs(ownerProbe and ownerProbe.results or {}) do
+    if seen[result.event] then duplicate = true end
+    seen[result.event] = true
+  end
+  check("no probed event is counted twice", not duplicate)
+
+  stub.state.forbiddenEvents = {}
+end
+
+--[[
+0.2.2: attributing an UnregisterEvent refusal to the exact event, the same
+way EW.RegisterEvent already attributes a RegisterEvent refusal.
+EW.UnregisterEvent, which the probe now calls only to undo a registration the
+client actually allowed, sets EW.lastRegisterAttempt around the client call
+exactly as EW.RegisterEvent does, so a report naming
+"EverythingWoWFrame:UnregisterEvent()" -- which NamesRegisterEvent also
+matches, "UnregisterEvent" carrying "RegisterEvent" inside it -- still places
+the one capability that event feeds rather than falling back to every
+capability at once. Run on Forever, where combatLog is not registered at
+load, so the probe attempts it fresh and the client allows the registration
+before refusing only the cleanup unregister.
+]]
+do
+  stub.state.forbiddenUnregisterEvents = { COMBAT_LOG_EVENT_UNFILTERED = true }
+  local unregisterGate = LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.state.printed = {}
+  unregisterGate.SlashCommand("probe")
+  stub.RunTimers(#unregisterGate.PROBE_EVENTS + 5)
+
+  local forbidden = unregisterGate.Database().lastForbidden
+  check("the unregister refusal is recorded", forbidden ~= nil)
+  check("the record names the UnregisterEvent method",
+    forbidden ~= nil and forbidden.fn ~= nil and forbidden.fn:find("UnregisterEvent", 1, true) ~= nil,
+    forbidden and forbidden.fn)
+  equal("the record names the exact event that was mid unregistration",
+    forbidden and forbidden.attemptedEvent, "COMBAT_LOG_EVENT_UNFILTERED")
+  equal("only the capability that event feeds is turned off",
+    unregisterGate.Caps.combatLog, false)
+  equal("an unrelated capability is left on, not wiped by the every-capability fallback",
+    unregisterGate.Caps.worldCursor, true)
+  equal("a second unrelated capability is also left on",
+    unregisterGate.Caps.unitGuid, true)
+  equal("a capability that was already off is left exactly there, not touched again",
+    unregisterGate.Caps.auction, false)
+
+  stub.state.forbiddenUnregisterEvents = {}
 end
 
 --[[ `/ewow cap <name> on|off`, the session only override for testing the

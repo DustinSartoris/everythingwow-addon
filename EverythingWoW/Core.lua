@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.1"
+EW.ADDON_VERSION = "0.2.2"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -160,27 +160,48 @@ so EW.Caps has to exist before either of them runs. WOW_PROJECT_ID and
 GetBuildInfo are both globals the client sets before any addon file
 executes, so neither one needs to wait for the event either.
 ]]
-EW.CAPABILITY_NAMES = { "worldCursor", "unitGuid", "combatLog" }
+EW.CAPABILITY_NAMES = { "worldCursor", "unitGuid", "combatLog", "auction" }
 
 -- Forever's own detectable patch line starts at 1.60. Adjust this once the
 -- owner's /dump confirms the interface number and, if Blizzard ever ships an
 -- earlier or later starting minor for it, the minor it actually launches on.
 local FOREVER_MIN_MINOR = 60
 
+--[[
+0.2.2 settles the Forever row on the owner's own build 1.60.1 probe, run
+against 0.2.1's every-capability-off default: `/ewow probe` reported
+NAME_PLATE_UNIT_ADDED, UPDATE_MOUSEOVER_UNIT, and PLAYER_TARGET_CHANGED
+allowed, COMBAT_LOG_EVENT_UNFILTERED and AUCTION_ITEM_LIST_UPDATE refused,
+and the owner's own `/ewow cap worldCursor on` and `/ewow cap unitGuid on`
+afterward raised no alert. worldCursor and unitGuid are therefore on for
+Forever starting here; combatLog stays off, since the probe refused the one
+event that capability gates and nothing has since proven it safe; and the
+new auction capability, gating AUCTION_ITEM_LIST_UPDATE and the rest of
+Auction.lua's own API calls, starts off for the same reason. worldCursor
+being on does not mean C_TooltipInfo.GetWorldCursor is proven safe by this
+probe alone, since the probe never calls it, only registers and unregisters
+the events; it is the owner's own manual `/ewow cap worldCursor on` test,
+with no alert following, that settles it.
+]]
 local CAPABILITY_TABLE = {
-  -- Retail: every path here is proven, live, in the 0.1.1 sample.
-  retail      = { worldCursor = true,  unitGuid = true,  combatLog = true  },
+  -- Retail: every path here is proven, live, in the 0.1.1 sample. Auction
+  -- observations on Retail come from Blizzard's own C_AuctionHouse API
+  -- rather than from this addon's scan, but the capability still gates
+  -- AUCTION_ITEM_LIST_UPDATE and this file's own auction functions, so it is
+  -- on here rather than moot.
+  retail      = { worldCursor = true,  unitGuid = true,  combatLog = true,  auction = true  },
   -- Classic Era and Hardcore: C_TooltipInfo does not exist on this client at
-  -- all, so worldCursor was already effectively off; unitGuid and combatLog
-  -- are the addon's long standing, unblocked behavior on this client.
-  classic_era = { worldCursor = false, unitGuid = true,  combatLog = true  },
-  hardcore    = { worldCursor = false, unitGuid = true,  combatLog = true  },
-  -- Forever: nothing restricted is proven safe yet. Every capability starts
-  -- off until an owner's paste turns one on.
-  forever     = { worldCursor = false, unitGuid = false, combatLog = false },
-  -- A client this table cannot place: the same row as Forever, not the same
-  -- row as Classic Era, because the safe default is the restrictive one.
-  unknown     = { worldCursor = false, unitGuid = false, combatLog = false },
+  -- all, so worldCursor was already effectively off; unitGuid, combatLog,
+  -- and auction are the addon's long standing, unblocked behavior on this
+  -- client, where Auction.lua's own scan is what records the auction house
+  -- at all, there being no C_AuctionHouse API to read instead.
+  classic_era = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
+  hardcore    = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
+  -- Forever: settled by the owner's own probe and capability tests above.
+  forever     = { worldCursor = true,  unitGuid = true,  combatLog = false, auction = false },
+  -- A client this table cannot place: the same row 0.2.1 gave Forever before
+  -- any probe existed, because the safe default is the restrictive one.
+  unknown     = { worldCursor = false, unitGuid = false, combatLog = false, auction = false },
 }
 
 --[[ A fresh capability table for a client key, defaulting to the unknown
@@ -253,6 +274,14 @@ local FUNCTION_CAPABILITY = {
   ["C_TooltipInfo.GetWorldCursor"] = "worldCursor",
   CombatLogGetCurrentEventInfo = "combatLog",
   UnitGUID = "unitGuid",
+  -- Every auction API Auction.lua calls: the old, positional API it reads on
+  -- Classic Era and Hardcore, where there is no C_AuctionHouse to read
+  -- instead. A report naming one of these directly, rather than the
+  -- RegisterEvent method AUCTION_ITEM_LIST_UPDATE's own refusal names, is
+  -- still placed at auction rather than falling back to every capability.
+  GetNumAuctionItems = "auction",
+  GetAuctionItemLink = "auction",
+  GetAuctionItemInfo = "auction",
 }
 
 function EW.CapabilityForFunction(fn)
@@ -280,6 +309,7 @@ local EVENT_CAPABILITY = {
   UPDATE_MOUSEOVER_UNIT = "unitGuid",
   PLAYER_TARGET_CHANGED = "unitGuid",
   COMBAT_LOG_EVENT_UNFILTERED = "combatLog",
+  AUCTION_ITEM_LIST_UPDATE = "auction",
 }
 
 function EW.CapabilityForEvent(event)
@@ -287,12 +317,19 @@ function EW.CapabilityForEvent(event)
   return EVENT_CAPABILITY[event]
 end
 
---[[ Whether a reported function name is the RegisterEvent call itself,
-     such as "EverythingWoWFrame:RegisterEvent()" or a bare
-     "RegisterEvent", rather than one of the specific calls
-     FUNCTION_CAPABILITY already places. ]]
+--[[ Whether a reported function name is the RegisterEvent call itself, such
+     as "EverythingWoWFrame:RegisterEvent()" or a bare "RegisterEvent", or
+     its counterpart UnregisterEvent, such as
+     "EverythingWoWFrame:UnregisterEvent()", rather than one of the specific
+     calls FUNCTION_CAPABILITY already places. The two are checked
+     separately, not as one substring: "UnregisterEvent" spells its own
+     "register" with a lowercase r, so it does not contain "RegisterEvent"
+     the way a naive substring check would expect, which is exactly why the
+     owner's own alert naming "EverythingWoWFrame:UnregisterEvent()" could
+     not be placed at all and fell back to turning every capability off. ]]
 local function NamesRegisterEvent(fn)
-  return type(fn) == "string" and fn:find("RegisterEvent", 1, true) ~= nil
+  if type(fn) ~= "string" then return false end
+  return fn:find("RegisterEvent", 1, true) ~= nil or fn:find("UnregisterEvent", 1, true) ~= nil
 end
 EW.NamesRegisterEvent = NamesRegisterEvent
 
@@ -612,6 +649,27 @@ function EW.RegisterEvent(event, handler)
   end
 end
 
+--[[
+The counterpart to EW.RegisterEvent, used only by EW.ProbeOneEvent today, and
+only to undo a registration the client actually allowed. It sets
+EW.lastRegisterAttempt around the client call exactly as EW.RegisterEvent
+does, because NamesRegisterEvent also matches "UnregisterEvent" -- the
+substring "RegisterEvent" is inside it -- so a report naming
+"EverythingWoWFrame:UnregisterEvent()" can still be placed at the exact event
+being unregistered rather than falling back to every capability off. This is
+what the owner's own Forever session needed and did not have: 0.2.1 called
+frame:UnregisterEvent directly, with EW.lastRegisterAttempt already cleared
+from the RegisterEvent call before it, so the client's own
+"EverythingWoWFrame:UnregisterEvent()" report could not be placed at all and
+turned off every restricted capability, worldCursor and unitGuid included,
+even though only combatLog's registration had actually been refused.
+]]
+function EW.UnregisterEvent(event)
+  EW.lastRegisterAttempt = event
+  pcall(function() frame:UnregisterEvent(event) end)
+  EW.lastRegisterAttempt = nil
+end
+
 function EW.Dispatch(event, ...)
   local list = handlers[event]
   if not list then return end
@@ -685,8 +743,9 @@ local function OnForbiddenAction(kind, addonName, functionName)
     DisableAllCapabilities()
   end
   -- Read by EW.ProbeOneEvent, which is the only other caller that sets
-  -- EW.lastRegisterAttempt and needs to know, right after its own
-  -- RegisterEvent call returns, whether this handler just fired for it.
+  -- EW.lastRegisterAttempt (through EW.RegisterEvent or EW.UnregisterEvent)
+  -- and needs to know, right after its own client call returns, whether
+  -- this handler just fired for it.
   if attemptedEvent then EW.probeRefusedEvent = attemptedEvent end
 
   EW.Print(string.format(
@@ -709,12 +768,16 @@ a time: an event this session already has running is reported allowed
 without being touched again, since registering or unregistering it here
 would test nothing and would take a working listener away for nothing, and
 an event that is not already running is registered fresh, through the same
-EW.lastRegisterAttempt path every other registration uses, then immediately
-unregistered whether the client allowed it or refused it, so the probe
-leaves nothing behind that was not already there. This is the systematic
+EW.lastRegisterAttempt path every other registration uses. An event the
+client allowed is then immediately unregistered, through EW.UnregisterEvent,
+so the probe leaves nothing behind that was not already there; an event the
+client refused is left alone, because there is nothing to unregister and,
+the owner's own Forever session proved, calling UnregisterEvent on a refused
+registration trips its own ADDON_ACTION_FORBIDDEN. This is the systematic
 version of what the owner's alert forced one event at a time: rather than
 learning which event a client refuses only when gameplay happens to trip
-it, every event the addon cares about is asked once, in a controlled order.
+it, every event the addon cares about is asked once, in a controlled order,
+and each one is tallied exactly once, whether allowed or refused.
 ]]
 EW.PROBE_EVENTS = {
   "NAME_PLATE_UNIT_ADDED",
@@ -731,7 +794,17 @@ EW.PROBE_EVENTS = {
   "AUCTION_ITEM_LIST_UPDATE",
 }
 
---[[ Probes one event and returns whether the client allowed it. ]]
+--[[ Probes one event and returns whether the client allowed it. A refused
+     registration is never followed by an unregister call: the client
+     refused it, so nothing was ever actually registered to undo, and the
+     owner's own Forever session showed that calling UnregisterEvent anyway
+     trips its own ADDON_ACTION_FORBIDDEN, reported after
+     EW.lastRegisterAttempt has already been cleared from the RegisterEvent
+     call, which the 0.2.1 handler could not place and so turned every
+     restricted capability off instead of just combatLog. An event the
+     client did allow is unregistered through EW.UnregisterEvent rather than
+     frame:UnregisterEvent directly, so that call is still attributed to the
+     exact event if it is ever refused too. ]]
 local function ProbeOneEvent(event)
   if frame.IsEventRegistered and frame:IsEventRegistered(event) then
     -- Already registered and running, which only happens because the
@@ -743,7 +816,9 @@ local function ProbeOneEvent(event)
   local ok = pcall(function() frame:RegisterEvent(event) end)
   EW.lastRegisterAttempt = nil
   local refused = (not ok) or (EW.probeRefusedEvent == event)
-  pcall(function() frame:UnregisterEvent(event) end)
+  if not refused then
+    EW.UnregisterEvent(event)
+  end
   return not refused
 end
 EW.ProbeOneEvent = ProbeOneEvent

@@ -35,6 +35,16 @@ local function reset()
     -- actually registers the event. Empty by default, which is every other
     -- client's behavior today.
     forbiddenEvents = {},
+    -- A set of event names this client refuses to unregister, regardless of
+    -- whether they are actually registered: UnregisterEvent for one of these
+    -- fires ADDON_ACTION_FORBIDDEN naming the UnregisterEvent method itself.
+    -- Used to prove a refusal there is attributed to the exact event rather
+    -- than falling back to every capability off. Empty by default.
+    forbiddenUnregisterEvents = {},
+    -- How many times UnregisterEvent has actually been called for each event
+    -- name, so a test can prove a refused RegisterEvent is never followed by
+    -- an unregister call at all, rather than merely one that fails quietly.
+    unregisterAttempts = {},
   }
 end
 reset()
@@ -55,7 +65,20 @@ local function CreateFrame(_, name)
     end
     self.events[event] = true
   end
-  function frame:UnregisterEvent(event) self.events[event] = nil end
+  function frame:UnregisterEvent(event)
+    stub.state.unregisterAttempts[event] = (stub.state.unregisterAttempts[event] or 0) + 1
+    if stub.state.forbiddenUnregisterEvents[event]
+      or (stub.state.forbiddenEvents[event] and not self.events[event]) then
+      -- Either this client refuses unregistering this event outright, or it
+      -- is the specific case the owner's own Forever session hit: an event
+      -- whose registration was refused, so the client never actually
+      -- registered it, and unregistering it anyway is itself forbidden.
+      -- Named the same way the owner's own alert named it.
+      stub.Fire("ADDON_ACTION_FORBIDDEN", "EverythingWoW", (self.name or "Frame") .. ":UnregisterEvent()")
+      return
+    end
+    self.events[event] = nil
+  end
   function frame:IsEventRegistered(event) return self.events[event] == true end
   function frame:SetScript(which, handler) self[which] = handler end
   function frame:HookScript(which, handler) self[which .. "_hook"] = handler end

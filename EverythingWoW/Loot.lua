@@ -18,6 +18,29 @@ Loot slots are grouped by their source GUID, so looting two corpses at once
 writes two observations rather than one mixed one. Gold is written as a gold
 entry rather than an item, because gold is not an item and the aggregation
 skips it.
+
+0.2.2, on a client with caps.combatLog off, such as Forever: COMBAT_LOG_EVENT_
+UNFILTERED is never registered at all (see the gate below), so the kill
+counter this file is also named for never runs there. A kill that drops
+loot is still recorded, in full, the moment the loot window opens, because
+OnLootOpened reads the source guid straight off GetLootSourceInfo rather
+than off anything the combat log tracked. A kill that drops nothing is the
+one real loss: with no combat log, this file has no other way to learn a
+creature died, so that kill is never recorded and the site's drop rate
+denominator for it is undercounted on a combat-log-off client. This is a
+known, accepted limit of running without the combat log, not something
+0.2.2 works around, and it is documented as such in the vault rather than
+compensated for in a way that could invent a kill that never happened.
+
+0.2.2 also stops dropping a loot window's items outright when the source
+guid cannot be placed as a creature or a game object, whatever the reason,
+combatLog being off among them: rather than losing the items, the
+observation is still written with its subject and its payload's source_type
+marked "unknown". The site's reader accepts a subject and a payload it does
+not recognize rather than refusing the observation, and the aggregation
+already requires a finite source id before a loot row counts toward any
+drop rate, so an unknown-sourced row is honestly excluded from that
+count rather than either lost or wrongly attributed.
 ]]
 
 local ADDON_NAME, EW = ...
@@ -185,6 +208,19 @@ local function OnLootOpened()
         items = bySource[guid],
         source_type = subject,
         source_id = id,
+        kills = 1,
+      })
+    elseif #bySource[guid] > 0 then
+      -- The source could not be placed: no source guid at all, or one this
+      -- client's capabilities or shape cannot read as a creature or a game
+      -- object. The items themselves are not the source's fault, so they are
+      -- still recorded, with the source marked unknown rather than the whole
+      -- opening being thrown away. EW.Record's own kind set already accepts
+      -- a nil id, and the site's reader accepts a subject it does not
+      -- recognize rather than refusing the file.
+      EW.Record("loot", "unknown", nil, mapId, x, y, {
+        items = bySource[guid],
+        source_type = "unknown",
         kills = 1,
       })
     end

@@ -13,6 +13,12 @@ auction house down for the player.
 
 The seller is never recorded. GetAuctionItemInfo returns the owner's name and
 that name is another player, so it is read past and thrown away.
+
+0.2.2 adds the auction capability, gating AUCTION_ITEM_LIST_UPDATE and the
+functions below: the owner's own Forever probe refused the event outright,
+which is the client this addon most needs to stay quiet for, so this
+recorder now checks caps.auction before it ever registers rather than
+finding out from an alert.
 ]]
 
 local ADDON_NAME, EW = ...
@@ -70,4 +76,19 @@ end
 
 EW.OnAuctionListUpdate = OnListUpdate
 
-EW.RegisterEvent("AUCTION_ITEM_LIST_UPDATE", OnListUpdate)
+-- Gated behind caps.auction: the owner's own Forever probe refused
+-- AUCTION_ITEM_LIST_UPDATE outright, so where the capability is off the
+-- listener is never registered at all rather than registered and refused
+-- every time the player opens the auction house. Where it is off, this
+-- recorder says so once in chat at the next login rather than staying
+-- silently idle, the same as every other recorder that cannot do its job on
+-- a client.
+if EW.Caps and EW.Caps.auction then
+  EW.RegisterEvent("AUCTION_ITEM_LIST_UPDATE", OnListUpdate)
+else
+  EW.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+    if EW.auctionIdleAnnounced then return end
+    EW.auctionIdleAnnounced = true
+    EW.Print("Auction recording is off for this client; the auction listener stays idle.")
+  end)
+end
