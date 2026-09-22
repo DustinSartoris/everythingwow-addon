@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.0"
+EW.ADDON_VERSION = "0.2.1"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -85,12 +85,18 @@ holds. WOW_PROJECT_ID is the only documented way a client says which game it
 is: WOW_PROJECT_MAINLINE is Retail and every other project is in the Classic
 Era family for our purposes, where a hardcore realm reports hardcore.
 
-Forever is not detectable. Blizzard has published no project id for it, so a
-Forever client answers with whatever project id its build carries and this
-function records it as classic_era. The rule stands until Blizzard ships a
-project id constant for Forever, at which point one branch is added here and
-nothing else in the addon changes. A Forever upload is therefore attributed
-to Classic Era until then, which is honest about what the client can tell us.
+Forever is not detectable by project id. Blizzard has published none of its
+own for it, and the owner's own build 1.60.1 reading came back carrying
+WOW_PROJECT_ID equal to WOW_PROJECT_MAINLINE, the same id Retail reports,
+rather than the Classic id this function was written expecting. This
+function is left unchanged regardless: the site's versions table has no
+enabled row for forever yet (that lands with EW.RunProbe below and a
+version rows change on the site), so an upload has to keep sending a key
+the site already accepts. A Forever session is therefore attributed to
+retail here, not classic_era as first assumed, which is honest about what
+this function alone can tell, though EW.ReadClient below no longer makes
+the same mistake for anything that is not this one saved field: see
+EW.Client and db.client.
 ]]
 function EW.VersionKey()
   local project = rawget(_G, "WOW_PROJECT_ID")
@@ -128,16 +134,23 @@ until it errors, which is the assumption World of Warcraft: Forever proved
 backwards: the addon was blocked with an alert naming no function, on build
 1.60.1, for using something "available only to the Blizzard UI."
 
-WOW_PROJECT_ID cannot name Forever by itself. Forever launches on a Classic
-1 to 60 ruleset and, per the owner's own build 1.60.1 reading, is expected to
-answer with the Classic project id rather than a project id of its own. The
-version string is what actually separates them: Classic Era's patches run
-1.14 and 1.15, and Forever's run 1.60 and up, so the client key is read off
-the version string's major and minor rather than off the project id alone.
-A version string this will not parse, or a project id this table has no row
-for, is treated as the most restrictive client there is: a client the table
-does not recognize gets Forever's row, not the most permissive one, because
-a permissive guess is exactly the mistake the alert punished.
+WOW_PROJECT_ID cannot name Forever by itself, and the owner's own build
+1.60.1 reading proved it worse than merely silent: that session's
+WOW_PROJECT_ID was the mainline id, the same one Retail reports, not the
+Classic id this addon first expected Forever to share. A project id check
+run ahead of the version string, as 0.2.0 ran it, therefore reads a Forever
+client as Retail outright and switches on every capability 0.2.0 shipped
+off for it, which is the exact alert this addon exists to stop causing. The
+version string is what actually, and only, separates Forever from
+everything else: Classic Era's patches run 1.14 and 1.15, and Forever's run
+1.60 and up, so the client key is read off the version string's major and
+minor first, before WOW_PROJECT_ID is even asked, whatever project id the
+client turns out to carry. A version string this will not parse, and a
+project id this table then has no row for either, is treated as the most
+restrictive client there is: a client the table does not recognize gets its
+own unknown row, off in exactly the same shape as Forever's, not the most
+permissive one, because a permissive guess is exactly the mistake the alert
+punished.
 
 EW.Client and EW.Caps are built here, at load, rather than waiting for
 ADDON_LOADED. The tooltip hook in Objects.lua and the combat log
@@ -199,10 +212,13 @@ function EW.ReadClient()
   local major, minor = ParseMajorMinor(version)
 
   local key
-  if project ~= nil and mainline ~= nil and project == mainline then
-    key = "retail"
-  elseif major == 1 and minor ~= nil and minor >= FOREVER_MIN_MINOR then
+  if major == 1 and minor ~= nil and minor >= FOREVER_MIN_MINOR then
+    -- Checked before WOW_PROJECT_ID, whatever project id comes back: the
+    -- owner's own Forever session carried the mainline id, and a project
+    -- id check ahead of this one reads that session as Retail.
     key = "forever"
+  elseif project ~= nil and mainline ~= nil and project == mainline then
+    key = "retail"
   elseif major ~= nil and minor ~= nil then
     local hardcore = false
     pcall(function()
@@ -224,9 +240,14 @@ EW.Client = EW.ReadClient()
 EW.Caps = EW.CapsFor(EW.Client.key)
 
 --[[ The function name an ADDON_ACTION_FORBIDDEN or ADDON_ACTION_BLOCKED
-     event names, mapped to the capability that call belongs to. The owner's
-     own alert on build 1.60.1 names no function at all, which the handler
-     below treats as a reason to turn every capability off rather than none. ]]
+     event names, mapped to the capability that call belongs to. A frame
+     method the client blames by its own name, such as RegisterEvent, is
+     never one of these keys: the same method serves every event this addon
+     registers, so it is not itself owned by one capability. See
+     EVENT_CAPABILITY and EW.lastRegisterAttempt below for how a
+     RegisterEvent refusal is placed instead, which the owner's own alert on
+     build 1.60.1, naming "EverythingWoWFrame:RegisterEvent()", needed and
+     0.2.0 did not have. ]]
 local FUNCTION_CAPABILITY = {
   GetWorldCursor = "worldCursor",
   ["C_TooltipInfo.GetWorldCursor"] = "worldCursor",
@@ -238,6 +259,42 @@ function EW.CapabilityForFunction(fn)
   if type(fn) ~= "string" then return nil end
   return FUNCTION_CAPABILITY[fn]
 end
+
+--[[
+The event name a RegisterEvent call was attempting, mapped to the
+capability the data that event feeds is gated behind. EW.RegisterEvent
+below records the event it is mid call on in EW.lastRegisterAttempt before
+it ever reaches the client, so a forbidden report naming the RegisterEvent
+method itself, rather than one of FUNCTION_CAPABILITY's own named calls,
+can still be placed at the one capability the refused event belongs to
+instead of every capability at once, which is what 0.2.0's handler did with
+exactly this report because RegisterEvent named a method, not a capability.
+
+An event with no row here, such as LOOT_OPENED or ADDON_LOADED, feeds no
+gated capability at all, so a refusal naming one of those still falls back
+to every capability off, the same fallback a report this table cannot
+place at all already gets.
+]]
+local EVENT_CAPABILITY = {
+  NAME_PLATE_UNIT_ADDED = "unitGuid",
+  UPDATE_MOUSEOVER_UNIT = "unitGuid",
+  PLAYER_TARGET_CHANGED = "unitGuid",
+  COMBAT_LOG_EVENT_UNFILTERED = "combatLog",
+}
+
+function EW.CapabilityForEvent(event)
+  if type(event) ~= "string" then return nil end
+  return EVENT_CAPABILITY[event]
+end
+
+--[[ Whether a reported function name is the RegisterEvent call itself,
+     such as "EverythingWoWFrame:RegisterEvent()" or a bare
+     "RegisterEvent", rather than one of the specific calls
+     FUNCTION_CAPABILITY already places. ]]
+local function NamesRegisterEvent(fn)
+  return type(fn) == "string" and fn:find("RegisterEvent", 1, true) ~= nil
+end
+EW.NamesRegisterEvent = NamesRegisterEvent
 
 --[[
 The player's map and position. C_Map gives the position as two fractions from
@@ -409,6 +466,14 @@ function EW.Database()
   end
   db.schema = EW.SCHEMA
   db.version = EW.VersionKey()
+  -- An extra field beside the upload's version key, not a replacement for
+  -- it: db.version has to stay a key the site's versions table already
+  -- enables, and forever is not one of those yet, so this addon's own
+  -- corrected client detection rides along under its own name instead.
+  -- readCompanionFile in the site's read.ts reads specific keys off this
+  -- table and ignores the rest, so an extra one here is carried, not
+  -- refused.
+  db.client = EW.Client and EW.Client.key or nil
   db.addon = EW.ADDON_VERSION
   db.patch = EW.Patch() or db.patch
   if type(db.observations) ~= "table" then db.observations = {} end
@@ -524,10 +589,22 @@ end
 local handlers = {}
 local frame = CreateFrame("Frame", "EverythingWoWFrame")
 
+--[[
+Every RegisterEvent call in this addon goes through here, one event at a
+time, rather than through the frame directly, so that a forbidden report
+naming the RegisterEvent method itself can still be attributed to the exact
+event that was mid call when it fired: EW.lastRegisterAttempt names that
+event for as long as the client is being asked and nothing longer, cleared
+whether the call succeeded, failed, or was refused. OnForbiddenAction below
+reads it, and so does EW.ProbeOneEvent, which calls frame:RegisterEvent
+directly for its own reasons but sets this the same way first.
+]]
 function EW.RegisterEvent(event, handler)
   if not handlers[event] then
     handlers[event] = {}
+    EW.lastRegisterAttempt = event
     local ok = pcall(function() frame:RegisterEvent(event) end)
+    EW.lastRegisterAttempt = nil
     if not ok then handlers[event] = nil end
   end
   if handlers[event] then
@@ -563,9 +640,13 @@ reported function, the client this ran on, and when, written into the saved
 file, with the matching capability turned off for the rest of this session
 so the addon stops making the call the client just refused.
 
-The owner's own alert on build 1.60.1 names no function, so a report with no
-function name is read as a reason to turn every restricted capability off
-for the session rather than as a report this addon cannot act on.
+The owner's own alert on build 1.60.1 names the RegisterEvent method rather
+than no function at all, and it is that method, not a report with truly no
+function name, that this handler now tries to place through
+EW.lastRegisterAttempt and EVENT_CAPABILITY before it falls back to turning
+every restricted capability off. A report this handler still cannot place
+by either path, including one that genuinely names no function, keeps the
+0.2.0 fallback: every capability off for the session rather than none.
 ]]
 local function DisableAllCapabilities()
   if not EW.Caps then return end
@@ -579,9 +660,15 @@ local function OnForbiddenAction(kind, addonName, functionName)
 
   local db = EW.Database()
   local fn = (type(functionName) == "string" and functionName ~= "") and functionName or nil
+  -- Only meaningful while a RegisterEvent call this handler's own report
+  -- names is actually mid call: NamesRegisterEvent(fn) is what tells a
+  -- report of "EverythingWoWFrame:RegisterEvent()" apart from one naming
+  -- GetWorldCursor or UnitGUID directly, which never touches this at all.
+  local attemptedEvent = NamesRegisterEvent(fn) and EW.lastRegisterAttempt or nil
   local record = {
     event = kind,
     fn = fn,
+    attemptedEvent = attemptedEvent,
     client = EW.Client and EW.Client.key or "unknown",
     build = EW.Client and EW.Client.version or nil,
     interface = EW.Client and EW.Client.interface or nil,
@@ -591,12 +678,16 @@ local function OnForbiddenAction(kind, addonName, functionName)
   while #db.forbidden > 50 do table.remove(db.forbidden, 1) end
   db.lastForbidden = record
 
-  local capability = EW.CapabilityForFunction(fn)
+  local capability = EW.CapabilityForFunction(fn) or EW.CapabilityForEvent(attemptedEvent)
   if capability then
     if EW.Caps then EW.Caps[capability] = false end
   else
     DisableAllCapabilities()
   end
+  -- Read by EW.ProbeOneEvent, which is the only other caller that sets
+  -- EW.lastRegisterAttempt and needs to know, right after its own
+  -- RegisterEvent call returns, whether this handler just fired for it.
+  if attemptedEvent then EW.probeRefusedEvent = attemptedEvent end
 
   EW.Print(string.format(
     "%s reported for %s on build %s. %s.",
@@ -611,6 +702,84 @@ EW.OnForbiddenAction = OnForbiddenAction
 
 EW.RegisterEvent("ADDON_ACTION_FORBIDDEN", function(...) OnForbiddenAction("ADDON_ACTION_FORBIDDEN", ...) end)
 EW.RegisterEvent("ADDON_ACTION_BLOCKED", function(...) OnForbiddenAction("ADDON_ACTION_BLOCKED", ...) end)
+
+--[[
+`/ewow probe`. Every event a recorder in this addon registers, tried one at
+a time: an event this session already has running is reported allowed
+without being touched again, since registering or unregistering it here
+would test nothing and would take a working listener away for nothing, and
+an event that is not already running is registered fresh, through the same
+EW.lastRegisterAttempt path every other registration uses, then immediately
+unregistered whether the client allowed it or refused it, so the probe
+leaves nothing behind that was not already there. This is the systematic
+version of what the owner's alert forced one event at a time: rather than
+learning which event a client refuses only when gameplay happens to trip
+it, every event the addon cares about is asked once, in a controlled order.
+]]
+EW.PROBE_EVENTS = {
+  "NAME_PLATE_UNIT_ADDED",
+  "UPDATE_MOUSEOVER_UNIT",
+  "PLAYER_TARGET_CHANGED",
+  "COMBAT_LOG_EVENT_UNFILTERED",
+  "LOOT_OPENED",
+  "GROUP_ROSTER_UPDATE",
+  "PLAYER_ENTERING_WORLD",
+  "PLAYER_LOGOUT",
+  "QUEST_DETAIL",
+  "QUEST_COMPLETE",
+  "MERCHANT_SHOW",
+  "AUCTION_ITEM_LIST_UPDATE",
+}
+
+--[[ Probes one event and returns whether the client allowed it. ]]
+local function ProbeOneEvent(event)
+  if frame.IsEventRegistered and frame:IsEventRegistered(event) then
+    -- Already registered and running, which only happens because the
+    -- client already allowed this event earlier in the session.
+    return true
+  end
+  EW.probeRefusedEvent = nil
+  EW.lastRegisterAttempt = event
+  local ok = pcall(function() frame:RegisterEvent(event) end)
+  EW.lastRegisterAttempt = nil
+  local refused = (not ok) or (EW.probeRefusedEvent == event)
+  pcall(function() frame:UnregisterEvent(event) end)
+  return not refused
+end
+EW.ProbeOneEvent = ProbeOneEvent
+
+--[[
+Runs the probe across every event in EW.PROBE_EVENTS, one per tick of
+C_Timer.After: waiting a tick between attempts gives a real forbidden
+action, which the client raises as its own event rather than as a Lua
+return value, room to arrive and be attributed before the next attempt
+starts, using the client's own event loop rather than a fixed delay this
+addon would have to guess at. onEvent is called with each event's result
+{event, allowed} as it completes and onDone with the full list once every
+event has been tried.
+]]
+function EW.RunProbe(onEvent, onDone)
+  local index = 0
+  local results = {}
+  local function step()
+    index = index + 1
+    local event = EW.PROBE_EVENTS[index]
+    if not event then
+      if onDone then onDone(results) end
+      return
+    end
+    local allowed = ProbeOneEvent(event)
+    local result = { event = event, allowed = allowed }
+    results[#results + 1] = result
+    if onEvent then onEvent(result) end
+    if C_Timer and C_Timer.After then
+      C_Timer.After(0, step)
+    else
+      step()
+    end
+  end
+  step()
+end
 
 --[[ The slash command. ]]
 --[[ The reasons in the order status prints them, so a reason a build stopped
@@ -656,7 +825,12 @@ local function Status()
   for _, observation in ipairs(db.observations) do
     counts[observation.kind] = (counts[observation.kind] or 0) + 1
   end
-  EW.Print(string.format("version %s, game %s, patch %s.", EW.ADDON_VERSION, tostring(db.version), tostring(db.patch)))
+  -- "game" reads EW.Client.key, not db.version: db.version is the upload's
+  -- own field and has to keep sending a key the site's versions table
+  -- already enables, which is not yet true of forever, while this line is
+  -- read by a person and should say what client this addon actually found.
+  EW.Print(string.format("version %s, game %s, patch %s.",
+    EW.ADDON_VERSION, tostring(EW.Client and EW.Client.key or db.version), tostring(db.patch)))
   EW.Print(string.format("client %s (interface %s, build %s).",
     EW.Client and EW.Client.key or "unknown",
     EW.Client and tostring(EW.Client.interface) or "?",
@@ -701,8 +875,55 @@ local function Clear()
   EW.Print("Cleared. Nothing recorded before now is still held.")
 end
 
+--[[ Runs the probe and prints one line per event, then saves the result to
+     the saved file so the upload carries it: the payload tolerates an
+     unknown top level field, the same reason db.client rides beside
+     db.version above, so nothing else has to change for it to travel. ]]
+local function Probe()
+  EW.Print(string.format("Probing %d events, one per tick. Watch for a forbidden action alert.",
+    #EW.PROBE_EVENTS))
+  EW.RunProbe(function(result)
+    EW.Print(string.format("  %s: %s", result.event, result.allowed and "allowed" or "refused"))
+  end, function(results)
+    local db = EW.Database()
+    db.probe = { t = Now(), results = results }
+    local refused = 0
+    for _, result in ipairs(results) do
+      if not result.allowed then refused = refused + 1 end
+    end
+    EW.Print(string.format(
+      "Probe complete: %d allowed, %d refused. Saved to the file for the next upload.",
+      #results - refused, refused))
+  end)
+end
+
+--[[ `/ewow cap <name> on|off`, flipping one capability for the session so
+     the owner can test the tooltip hook or the GUID path on its own once
+     the probe has said which events the client allows. This does not
+     persist and does not touch what a forbidden report already turned
+     off; it is a session only override for testing. ]]
+local function Cap(rest)
+  local name, state = string.match(rest, "^(%S+)%s+(%S+)$")
+  state = state and string.lower(state)
+  local canonical
+  if name then
+    local lowerName = string.lower(name)
+    for _, capName in ipairs(EW.CAPABILITY_NAMES) do
+      if string.lower(capName) == lowerName then canonical = capName end
+    end
+  end
+  if not canonical or (state ~= "on" and state ~= "off") then
+    EW.Print("Usage: /ewow cap <name> on|off. Names: " .. table.concat(EW.CAPABILITY_NAMES, ", "))
+    return
+  end
+  if EW.Caps then EW.Caps[canonical] = (state == "on") end
+  EW.Print(string.format("%s turned %s for this session.", canonical, state))
+end
+
 function EW.SlashCommand(message)
-  local command = string.lower(string.match(tostring(message or ""), "^%s*(%S*)") or "")
+  local text = tostring(message or "")
+  local command = string.lower(string.match(text, "^%s*(%S*)") or "")
+  local rest = string.match(text, "^%s*%S*%s*(.-)%s*$") or ""
   if command == "status" or command == "" then
     Status()
   elseif command == "clear" then
@@ -716,8 +937,12 @@ function EW.SlashCommand(message)
   elseif command == "path" then
     EW.Print("World of Warcraft\\WTF\\Account\\<ACCOUNT>\\SavedVariables\\EverythingWoW.lua")
     EW.Print("The file is written when you log out or reload the interface.")
+  elseif command == "probe" then
+    Probe()
+  elseif command == "cap" then
+    Cap(rest)
   else
-    EW.Print("Commands: /ewow status, /ewow clear, /ewow snapshot, /ewow path.")
+    EW.Print("Commands: /ewow status, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off.")
   end
 end
 

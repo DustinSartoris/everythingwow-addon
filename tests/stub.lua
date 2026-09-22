@@ -29,6 +29,12 @@ local function reset()
     combatLog = nil,
     realm = "Tichondrius",
     hardcore = false,
+    -- A set of event names this client refuses to register at all: RegisterEvent
+    -- for one of these fires ADDON_ACTION_FORBIDDEN naming the RegisterEvent
+    -- method itself, the way the owner's own Forever alert read, and never
+    -- actually registers the event. Empty by default, which is every other
+    -- client's behavior today.
+    forbiddenEvents = {},
   }
 end
 reset()
@@ -38,8 +44,19 @@ local frames = {}
 
 local function CreateFrame(_, name)
   local frame = { events = {}, name = name }
-  function frame:RegisterEvent(event) self.events[event] = true end
+  function frame:RegisterEvent(event)
+    if stub.state.forbiddenEvents[event] then
+      -- The client refuses the registration itself rather than the call the
+      -- handler would have made once registered, and names the method
+      -- rather than the event, exactly as the owner's own alert did: "for
+      -- EverythingWoWFrame:RegisterEvent()", naming this addon.
+      stub.Fire("ADDON_ACTION_FORBIDDEN", "EverythingWoW", (self.name or "Frame") .. ":RegisterEvent()")
+      return
+    end
+    self.events[event] = true
+  end
   function frame:UnregisterEvent(event) self.events[event] = nil end
+  function frame:IsEventRegistered(event) return self.events[event] == true end
   function frame:SetScript(which, handler) self[which] = handler end
   function frame:HookScript(which, handler) self[which .. "_hook"] = handler end
   frames[#frames + 1] = frame

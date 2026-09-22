@@ -83,7 +83,8 @@ _G.EverythingWoWDB = nil
 local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
-equal("addon is the addon version", saved.addon, "0.2.0")
+equal("client rides beside version as its own field", saved.client, "retail")
+equal("addon is the addon version", saved.addon, "0.2.1")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -531,6 +532,115 @@ equal("an unknown client defaults the world cursor capability off", unknownGate.
 equal("an unknown client defaults the unit guid capability off", unknownGate.Caps.unitGuid, false)
 equal("an unknown client defaults the combat log capability off", unknownGate.Caps.combatLog, false)
 check("an unknown client never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+
+--[[
+0.2.1: Forever is read off the version string before WOW_PROJECT_ID is even
+asked, because the owner's own build 1.60.1 session carried the mainline
+project id, the same one Retail reports, not the Classic id 0.2.0 expected
+Forever to share. A project id check run ahead of the version string, the
+way 0.2.0 ran it, reads this exact session as Retail and switches every
+capability back on, which is the misclassification 0.2.1 fixes.
+]]
+_G.GameTooltip.OnShow = nil
+local foreverOnMainline = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+equal("a 1.60 build on the mainline project id still reads as forever",
+  foreverOnMainline.Client.key, "forever")
+equal("forever's world cursor capability defaults off on the mainline project id too",
+  foreverOnMainline.Caps.worldCursor, false)
+equal("forever's unit guid capability defaults off on the mainline project id too",
+  foreverOnMainline.Caps.unitGuid, false)
+equal("forever's combat log capability defaults off on the mainline project id too",
+  foreverOnMainline.Caps.combatLog, false)
+check("forever on the mainline project id never installs the tooltip hook",
+  _G.GameTooltip.OnShow == nil)
+
+--[[
+Attributing a RegisterEvent refusal to the exact event being registered,
+rather than to every capability at once. The owner's own alert named
+"EverythingWoWFrame:RegisterEvent()", the method every recorder's own
+registration goes through, not GetWorldCursor, UnitGUID, or
+CombatLogGetCurrentEventInfo, so FUNCTION_CAPABILITY alone could never place
+it and 0.2.0 turned every capability off in response. Run against a fresh
+Retail instance, where every capability starts on, so a selective turn off
+proves the fix rather than a client that already had everything off to
+begin with. stub.state.forbiddenEvents makes the stub's own RegisterEvent
+refuse one named event exactly the way the owner's alert read.
+]]
+do
+  _G.GameTooltip.OnShow = nil
+  stub.state.forbiddenEvents = { NAME_PLATE_UNIT_ADDED = true }
+  local attributionGate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+  stub.state.forbiddenEvents = {}
+
+  local forbidden = attributionGate.Database().lastForbidden
+  check("registering the refused event at load recorded a forbidden action", forbidden ~= nil)
+  check("the record names the RegisterEvent method, not one of a capability's own functions",
+    forbidden ~= nil and forbidden.fn ~= nil and forbidden.fn:find("RegisterEvent", 1, true) ~= nil,
+    forbidden and forbidden.fn)
+  equal("the record names the exact event that was mid registration",
+    forbidden and forbidden.attemptedEvent, "NAME_PLATE_UNIT_ADDED")
+  equal("only the capability that event feeds is turned off",
+    attributionGate.Caps.unitGuid, false)
+  equal("an unrelated capability is left on, unlike 0.2.0's every capability off fallback",
+    attributionGate.Caps.worldCursor, true)
+  equal("a second unrelated capability is also left on",
+    attributionGate.Caps.combatLog, true)
+end
+
+--[[
+`/ewow probe`. Built against a fresh Retail instance with the combat log
+listener refused, so the run proves both an allowed line and a refused
+line in one pass, and drives EW.RunProbe's C_Timer.After chain with
+stub.RunTimers the way the owner's own client would drive it one tick at a
+time rather than all at once.
+]]
+do
+  _G.GameTooltip.OnShow = nil
+  stub.state.forbiddenEvents = { COMBAT_LOG_EVENT_UNFILTERED = true }
+  local probeGate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+  equal("the refused event's capability is already off from the load time attempt",
+    probeGate.Caps.combatLog, false)
+
+  stub.state.printed = {}
+  probeGate.SlashCommand("probe")
+  stub.RunTimers(#probeGate.PROBE_EVENTS + 5)
+  local text = table.concat(stub.state.printed, "\n")
+  check("the probe prints a line for an allowed event",
+    text:find("NAME_PLATE_UNIT_ADDED: allowed", 1, true) ~= nil, text)
+  check("the probe prints a line for the refused event",
+    text:find("COMBAT_LOG_EVENT_UNFILTERED: refused", 1, true) ~= nil, text)
+  check("the probe reports its own tally",
+    text:find("11 allowed, 1 refused", 1, true) ~= nil, text)
+
+  local probe = probeGate.Database().probe
+  check("the probe result is written to the saved file", probe ~= nil)
+  equal("the saved probe holds one result per probed event",
+    probe and #probe.results, #probeGate.PROBE_EVENTS)
+  local combatLogResult
+  for _, result in ipairs(probe and probe.results or {}) do
+    if result.event == "COMBAT_LOG_EVENT_UNFILTERED" then combatLogResult = result end
+  end
+  check("the saved probe holds the refused event's own result",
+    combatLogResult ~= nil and combatLogResult.allowed == false)
+  stub.state.forbiddenEvents = {}
+end
+
+--[[ `/ewow cap <name> on|off`, the session only override for testing the
+     tooltip hook and the GUID path once the probe has told the owner which
+     events the client allows. ]]
+do
+  local capGate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+  equal("world cursor starts on for a fresh retail instance", capGate.Caps.worldCursor, true)
+  capGate.SlashCommand("cap worldCursor off")
+  equal("cap turns a capability off for the session", capGate.Caps.worldCursor, false)
+  capGate.SlashCommand("cap worldCursor on")
+  equal("cap turns a capability back on for the session", capGate.Caps.worldCursor, true)
+  stub.state.printed = {}
+  capGate.SlashCommand("cap notARealCapability on")
+  equal("an unknown capability name changes nothing", capGate.Caps.worldCursor, true)
+  check("an unknown capability name prints a usage line",
+    table.concat(stub.state.printed, "\n"):find("Usage", 1, true) ~= nil)
+end
 
 -- The rest of this file continues against a fresh, unrelated retail
 -- instance, so the scenarios above cannot leak into the SavedVariables file
