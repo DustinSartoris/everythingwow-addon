@@ -33,14 +33,31 @@ local function equal(name, actual, expected)
   check(name, actual == expected, "expected " .. tostring(expected) .. ", got " .. tostring(actual))
 end
 
-local EW = {}
 stub.Install(_G)
 
 local FILES = { "Core", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Auction" }
-for _, name in ipairs(FILES) do
-  local chunk = assert(loadfile(root .. "EverythingWoW/" .. name .. ".lua"))
-  chunk("EverythingWoW", EW)
+
+--[[ Loads every addon file fresh into a new table, the way the game loads
+     them once at login: EW.Client and EW.Caps are computed as Core.lua
+     loads, and the tooltip hook and the combat log registration run, or do
+     not, in that same pass. Used to prove the capability gates against a
+     client set before any file is loaded, which a single already loaded EW
+     instance cannot be re-pointed at. ]]
+local function LoadFreshAddon(project, build)
+  _G.WOW_PROJECT_ID = project
+  stub.state.build = build
+  stub.state.project = project
+  stub.ResetFrames()
+  _G.EverythingWoWDB = nil
+  local fresh = {}
+  for _, name in ipairs(FILES) do
+    local chunk = assert(loadfile(root .. "EverythingWoW/" .. name .. ".lua"))
+    chunk("EverythingWoW", fresh)
+  end
+  return fresh
 end
+
+local EW = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
 
 stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 80, isPlayer = true }
 
@@ -66,7 +83,7 @@ _G.EverythingWoWDB = nil
 local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
-equal("addon is the addon version", saved.addon, "0.1.1")
+equal("addon is the addon version", saved.addon, "0.2.0")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -384,6 +401,143 @@ equal("clear empties the buffer", #observations(), 0)
 EW.SlashCommand("snapshot")
 equal("snapshot records one observation", #observations(), 1)
 equal("snapshot is the snapshot kind", last().kind, "character_snapshot")
+
+--[[
+The client capability gates. Each client is loaded fresh, because
+EW.Client and EW.Caps are built once when Core.lua loads and the tooltip
+hook and the combat log registration in the other files run in that same
+pass, before any event can fire. A single already loaded instance cannot be
+re-pointed at a different client, so this proves the gates by loading the
+real files four times over: Retail, Classic Era, Forever, and a client the
+table does not recognize at all.
+]]
+_G.GameTooltip.OnShow = nil
+local retailGate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+equal("retail reads as the retail client", retailGate.Client.key, "retail")
+equal("retail's world cursor capability is on", retailGate.Caps.worldCursor, true)
+equal("retail's unit guid capability is on", retailGate.Caps.unitGuid, true)
+equal("retail's combat log capability is on", retailGate.Caps.combatLog, true)
+check("retail installs the tooltip hook", _G.GameTooltip.OnShow ~= nil)
+
+_G.GameTooltip.OnShow = nil
+local classicGate = LoadFreshAddon(2, { "1.15.9", "50000", "Sep 17 2026", 11509 })
+equal("a 1.15 build reads as classic era", classicGate.Client.key, "classic_era")
+equal("classic era's world cursor capability is off", classicGate.Caps.worldCursor, false)
+equal("classic era's unit guid capability is on", classicGate.Caps.unitGuid, true)
+equal("classic era's combat log capability is on", classicGate.Caps.combatLog, true)
+check("classic era never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+
+_G.GameTooltip.OnShow = nil
+-- Build 1.60.1 is the owner's own reading, on what the note expects to be
+-- the shared Classic project id.
+local foreverGate = LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+equal("a 1.60 build on the classic project id reads as forever", foreverGate.Client.key, "forever")
+equal("forever's world cursor capability defaults off", foreverGate.Caps.worldCursor, false)
+equal("forever's unit guid capability defaults off", foreverGate.Caps.unitGuid, false)
+equal("forever's combat log capability defaults off", foreverGate.Caps.combatLog, false)
+check("forever never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+
+-- Firing every gated event on the Forever instance writes no observation and
+-- raises no error, because the capability is checked before the client is
+-- ever asked anything, not after.
+do
+  stub.state.units.nameplate1 = {
+    guid = "Creature-0-3888-0-11-2914-000136DF91", name = "Kobold Vermin",
+    level = 3, reaction = 2,
+  }
+  stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+  equal("a gated guid reader writes no npc observation on forever",
+    #foreverGate.Database().observations, 0)
+  equal("a gated guid reader is counted as no id, not as a skip",
+    foreverGate.Database().skipped, 0)
+
+  stub.state.units.target = { guid = "Creature-0-3888-0-11-2914-000136DF91" }
+  stub.state.combatLog = { subevent = "UNIT_DIED", destGuid = "Creature-0-3888-0-11-2914-000136DF91" }
+  stub.Fire("COMBAT_LOG_EVENT_UNFILTERED")
+  equal("the combat log listener is never registered on forever",
+    #foreverGate.Database().observations, 0)
+
+  local before = foreverGate.Database().ignored
+  equal("the world cursor path refuses without calling the client", foreverGate.RecordCursorObject(), false)
+  equal("and it is counted as ignored, the same reason as no world cursor at all",
+    foreverGate.Database().ignored, before + 1)
+end
+
+--[[
+ADDON_ACTION_FORBIDDEN and ADDON_ACTION_BLOCKED. Fired at the Forever
+instance built above, since that is the one client where these are expected.
+This runs before the unknown client scenario below, because that scenario's
+own LoadFreshAddon resets the frame list and would otherwise take Forever's
+frame out of stub.Fire's reach.
+]]
+do
+  equal("no forbidden action is recorded before one fires",
+    foreverGate.Database().lastForbidden, nil)
+  stub.Fire("ADDON_ACTION_FORBIDDEN", "SomeOtherAddon", "UnitGUID")
+  equal("a report naming a different addon is not recorded",
+    foreverGate.Database().lastForbidden, nil)
+
+  stub.Fire("ADDON_ACTION_FORBIDDEN", "EverythingWoW", "UnitGUID")
+  local forbidden = foreverGate.Database().lastForbidden
+  check("a report naming this addon is recorded", forbidden ~= nil)
+  equal("the record names the reported function", forbidden.fn, "UnitGUID")
+  equal("the record names the client", forbidden.client, "forever")
+  equal("the record names the build", forbidden.build, "1.60.1")
+  equal("the matching capability is turned off for the session",
+    foreverGate.Caps.unitGuid, false)
+  equal("an unrelated capability is left alone",
+    foreverGate.Caps.combatLog, false)
+  check("one line is printed to chat", #stub.state.printed > 0)
+end
+
+-- status prints the client, the capabilities, and the last forbidden record.
+-- This has to read foreverGate's own saved file before anything else reloads
+-- the addon: EverythingWoWDB is one global, the same one the real client
+-- would give a single addon instance, so a later LoadFreshAddon call resets
+-- it out from under whichever instance's data was read last.
+do
+  stub.state.printed = {}
+  foreverGate.SlashCommand("status")
+  local text = table.concat(stub.state.printed, "\n")
+  check("status prints the client key", text:find("forever", 1, true) ~= nil, text)
+  check("status prints the capability table", text:find("capabilities:", 1, true) ~= nil, text)
+  check("status prints the last forbidden action", text:find("last forbidden action", 1, true) ~= nil, text)
+  check("status names the reported function", text:find("UnitGUID", 1, true) ~= nil, text)
+end
+
+-- The owner's own alert names no function at all. Every restricted
+-- capability that was still on is the one this addon can turn off in
+-- response to a report it cannot otherwise place.
+do
+  local secondGate = LoadFreshAddon(2, { "1.15.9", "50000", "Sep 17 2026", 11509 })
+  equal("classic era's world cursor capability starts off, as always",
+    secondGate.Caps.worldCursor, false)
+  check("classic era's other capabilities start on",
+    secondGate.Caps.unitGuid and secondGate.Caps.combatLog)
+  stub.Fire("ADDON_ACTION_BLOCKED", "EverythingWoW")
+  check("a report naming no function turns every capability off",
+    not secondGate.Caps.unitGuid and not secondGate.Caps.combatLog and not secondGate.Caps.worldCursor)
+  equal("the record still holds, with no function name",
+    secondGate.Database().lastForbidden.fn, nil)
+  equal("the record still names the event", secondGate.Database().lastForbidden.event, "ADDON_ACTION_BLOCKED")
+end
+
+-- An unrecognized client, project id and version string both unreadable, is
+-- the most restrictive client there is, not the most permissive.
+_G.GameTooltip.OnShow = nil
+local unknownGate = LoadFreshAddon(99, { "", "0", "", nil })
+equal("an unreadable client is the unknown key", unknownGate.Client.key, "unknown")
+equal("an unknown client defaults the world cursor capability off", unknownGate.Caps.worldCursor, false)
+equal("an unknown client defaults the unit guid capability off", unknownGate.Caps.unitGuid, false)
+equal("an unknown client defaults the combat log capability off", unknownGate.Caps.combatLog, false)
+check("an unknown client never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+
+-- The rest of this file continues against a fresh, unrelated retail
+-- instance, so the scenarios above cannot leak into the SavedVariables file
+-- this script writes at the end.
+_G.GameTooltip.OnShow = nil
+EW = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 80, isPlayer = true }
 
 --[[
 The live capture from 0.1.0, anonymized.

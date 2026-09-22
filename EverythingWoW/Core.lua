@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.1.1"
+EW.ADDON_VERSION = "0.2.0"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -120,6 +120,126 @@ function EW.Patch()
 end
 
 --[[
+The client this addon is running on, and the capability table gated on it.
+
+Every class A and class B call in the compatibility inventory sits behind a
+named capability here, resolved once per client rather than assumed to work
+until it errors, which is the assumption World of Warcraft: Forever proved
+backwards: the addon was blocked with an alert naming no function, on build
+1.60.1, for using something "available only to the Blizzard UI."
+
+WOW_PROJECT_ID cannot name Forever by itself. Forever launches on a Classic
+1 to 60 ruleset and, per the owner's own build 1.60.1 reading, is expected to
+answer with the Classic project id rather than a project id of its own. The
+version string is what actually separates them: Classic Era's patches run
+1.14 and 1.15, and Forever's run 1.60 and up, so the client key is read off
+the version string's major and minor rather than off the project id alone.
+A version string this will not parse, or a project id this table has no row
+for, is treated as the most restrictive client there is: a client the table
+does not recognize gets Forever's row, not the most permissive one, because
+a permissive guess is exactly the mistake the alert punished.
+
+EW.Client and EW.Caps are built here, at load, rather than waiting for
+ADDON_LOADED. The tooltip hook in Objects.lua and the combat log
+registration in Loot.lua run as those files load, in the same table of
+contents pass, and both finish before ADDON_LOADED for this addon can fire,
+so EW.Caps has to exist before either of them runs. WOW_PROJECT_ID and
+GetBuildInfo are both globals the client sets before any addon file
+executes, so neither one needs to wait for the event either.
+]]
+EW.CAPABILITY_NAMES = { "worldCursor", "unitGuid", "combatLog" }
+
+-- Forever's own detectable patch line starts at 1.60. Adjust this once the
+-- owner's /dump confirms the interface number and, if Blizzard ever ships an
+-- earlier or later starting minor for it, the minor it actually launches on.
+local FOREVER_MIN_MINOR = 60
+
+local CAPABILITY_TABLE = {
+  -- Retail: every path here is proven, live, in the 0.1.1 sample.
+  retail      = { worldCursor = true,  unitGuid = true,  combatLog = true  },
+  -- Classic Era and Hardcore: C_TooltipInfo does not exist on this client at
+  -- all, so worldCursor was already effectively off; unitGuid and combatLog
+  -- are the addon's long standing, unblocked behavior on this client.
+  classic_era = { worldCursor = false, unitGuid = true,  combatLog = true  },
+  hardcore    = { worldCursor = false, unitGuid = true,  combatLog = true  },
+  -- Forever: nothing restricted is proven safe yet. Every capability starts
+  -- off until an owner's paste turns one on.
+  forever     = { worldCursor = false, unitGuid = false, combatLog = false },
+  -- A client this table cannot place: the same row as Forever, not the same
+  -- row as Classic Era, because the safe default is the restrictive one.
+  unknown     = { worldCursor = false, unitGuid = false, combatLog = false },
+}
+
+--[[ A fresh capability table for a client key, defaulting to the unknown
+     (most restrictive) row for a key the table does not carry. ]]
+function EW.CapsFor(key)
+  local row = CAPABILITY_TABLE[key] or CAPABILITY_TABLE.unknown
+  local caps = {}
+  for _, name in ipairs(EW.CAPABILITY_NAMES) do
+    caps[name] = row[name] == true
+  end
+  return caps
+end
+
+local function ParseMajorMinor(version)
+  if type(version) ~= "string" then return nil, nil end
+  local major, minor = version:match("^(%d+)%.(%d+)")
+  return tonumber(major), tonumber(minor)
+end
+
+--[[ Reads the client from WOW_PROJECT_ID, the version string GetBuildInfo
+     returns first, and the fourth return of GetBuildInfo, the interface
+     number, kept for reporting rather than for the key itself. ]]
+function EW.ReadClient()
+  local version, build, date, interface
+  pcall(function() version, build, date, interface = GetBuildInfo() end)
+
+  local project = rawget(_G, "WOW_PROJECT_ID")
+  local mainline = rawget(_G, "WOW_PROJECT_MAINLINE")
+  local major, minor = ParseMajorMinor(version)
+
+  local key
+  if project ~= nil and mainline ~= nil and project == mainline then
+    key = "retail"
+  elseif major == 1 and minor ~= nil and minor >= FOREVER_MIN_MINOR then
+    key = "forever"
+  elseif major ~= nil and minor ~= nil then
+    local hardcore = false
+    pcall(function()
+      if C_GameRules and C_GameRules.IsHardcoreActive then
+        hardcore = C_GameRules.IsHardcoreActive() and true or false
+      elseif type(rawget(_G, "IsHardcoreActive")) == "function" then
+        hardcore = IsHardcoreActive() and true or false
+      end
+    end)
+    key = hardcore and "hardcore" or "classic_era"
+  else
+    key = "unknown"
+  end
+
+  return { key = key, project = project, interface = interface, version = version, build = build }
+end
+
+EW.Client = EW.ReadClient()
+EW.Caps = EW.CapsFor(EW.Client.key)
+
+--[[ The function name an ADDON_ACTION_FORBIDDEN or ADDON_ACTION_BLOCKED
+     event names, mapped to the capability that call belongs to. The owner's
+     own alert on build 1.60.1 names no function at all, which the handler
+     below treats as a reason to turn every capability off rather than none. ]]
+local FUNCTION_CAPABILITY = {
+  GetWorldCursor = "worldCursor",
+  ["C_TooltipInfo.GetWorldCursor"] = "worldCursor",
+  CombatLogGetCurrentEventInfo = "combatLog",
+  UnitGUID = "unitGuid",
+}
+
+function EW.CapabilityForFunction(fn)
+  if type(fn) ~= "string" then return nil end
+  return FUNCTION_CAPABILITY[fn]
+end
+
+--[[
 The player's map and position. C_Map gives the position as two fractions from
 0 to 1 with the origin at the top left of the map image, which is the
 coordinate contract the site and the aggregation are written against, so
@@ -157,6 +277,14 @@ carries no id we record, and this returns nothing for it, which is how the
 recorders avoid ever writing another player.
 ]]
 function EW.SubjectFromGuid(guid)
+  -- Gated behind caps.unitGuid: under the secret value system a GUID for a
+  -- unit outside the player's group may not be pattern matched or compared,
+  -- so where the capability is off this returns nothing rather than
+  -- touching the value at all. Every caller already treats a subject this
+  -- returns nothing for as a subject it could not place, so nothing else
+  -- has to change for the recorders to fall back to what a window's own
+  -- links and text can tell them.
+  if not (EW.Caps and EW.Caps.unitGuid) then return nil, nil end
   if type(guid) ~= "string" then return nil, nil end
   local unitType = string.match(guid, "^(%a+)%-")
   if not unitType then return nil, nil end
@@ -291,6 +419,7 @@ function EW.Database()
   if type(db.skips) ~= "table" then db.skips = {} end
   if type(db.dedupes) ~= "table" then db.dedupes = {} end
   if type(db.ignores) ~= "table" then db.ignores = {} end
+  if type(db.forbidden) ~= "table" then db.forbidden = {} end
   return db
 end
 
@@ -426,6 +555,63 @@ frame:SetScript("OnEvent", function(_, event, ...)
 end)
 frame:RegisterEvent("ADDON_LOADED")
 
+--[[
+ADDON_ACTION_FORBIDDEN and ADDON_ACTION_BLOCKED, named at this addon. The
+client fires one of these instead of the alert continuing silently a second
+time, and this is what turns a screenshot into evidence in the upload: the
+reported function, the client this ran on, and when, written into the saved
+file, with the matching capability turned off for the rest of this session
+so the addon stops making the call the client just refused.
+
+The owner's own alert on build 1.60.1 names no function, so a report with no
+function name is read as a reason to turn every restricted capability off
+for the session rather than as a report this addon cannot act on.
+]]
+local function DisableAllCapabilities()
+  if not EW.Caps then return end
+  for _, capability in ipairs(EW.CAPABILITY_NAMES) do
+    EW.Caps[capability] = false
+  end
+end
+
+local function OnForbiddenAction(kind, addonName, functionName)
+  if type(addonName) ~= "string" or addonName ~= ADDON_NAME then return end
+
+  local db = EW.Database()
+  local fn = (type(functionName) == "string" and functionName ~= "") and functionName or nil
+  local record = {
+    event = kind,
+    fn = fn,
+    client = EW.Client and EW.Client.key or "unknown",
+    build = EW.Client and EW.Client.version or nil,
+    interface = EW.Client and EW.Client.interface or nil,
+    t = Now(),
+  }
+  table.insert(db.forbidden, record)
+  while #db.forbidden > 50 do table.remove(db.forbidden, 1) end
+  db.lastForbidden = record
+
+  local capability = EW.CapabilityForFunction(fn)
+  if capability then
+    if EW.Caps then EW.Caps[capability] = false end
+  else
+    DisableAllCapabilities()
+  end
+
+  EW.Print(string.format(
+    "%s reported for %s on build %s. %s.",
+    kind,
+    fn or "an unnamed function",
+    tostring(record.build),
+    capability and (capability .. " turned off for this session")
+      or "every restricted capability turned off for this session"
+  ))
+end
+EW.OnForbiddenAction = OnForbiddenAction
+
+EW.RegisterEvent("ADDON_ACTION_FORBIDDEN", function(...) OnForbiddenAction("ADDON_ACTION_FORBIDDEN", ...) end)
+EW.RegisterEvent("ADDON_ACTION_BLOCKED", function(...) OnForbiddenAction("ADDON_ACTION_BLOCKED", ...) end)
+
 --[[ The slash command. ]]
 --[[ The reasons in the order status prints them, so a reason a build stopped
      using still prints if the saved file holds it. ]]
@@ -453,6 +639,17 @@ local function ReasonLine(counts)
 end
 EW.ReasonLine = ReasonLine
 
+--[[ The capability table as one line, in EW.CAPABILITY_NAMES order. ]]
+local function CapsLine()
+  if not EW.Caps then return nil end
+  local parts = {}
+  for _, name in ipairs(EW.CAPABILITY_NAMES) do
+    parts[#parts + 1] = string.format("%s %s", name, EW.Caps[name] and "on" or "off")
+  end
+  return table.concat(parts, ", ")
+end
+EW.CapsLine = CapsLine
+
 local function Status()
   local db = EW.Database()
   local counts = {}
@@ -460,6 +657,20 @@ local function Status()
     counts[observation.kind] = (counts[observation.kind] or 0) + 1
   end
   EW.Print(string.format("version %s, game %s, patch %s.", EW.ADDON_VERSION, tostring(db.version), tostring(db.patch)))
+  EW.Print(string.format("client %s (interface %s, build %s).",
+    EW.Client and EW.Client.key or "unknown",
+    EW.Client and tostring(EW.Client.interface) or "?",
+    EW.Client and tostring(EW.Client.version) or "?"))
+  local caps = CapsLine()
+  if caps then EW.Print("capabilities: " .. caps) end
+  local lastForbidden = db.lastForbidden
+  if lastForbidden then
+    EW.Print(string.format("last forbidden action: %s for %s on build %s (client %s).",
+      lastForbidden.event, lastForbidden.fn or "an unnamed function",
+      tostring(lastForbidden.build), tostring(lastForbidden.client)))
+  else
+    EW.Print("no forbidden action reported yet.")
+  end
   EW.Print(string.format("%d observations held, %d dropped.", #db.observations, db.dropped))
   for _, kind in ipairs(EW.KINDS) do
     if counts[kind] then EW.Print(string.format("  %s: %d", kind, counts[kind])) end

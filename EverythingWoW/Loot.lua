@@ -194,7 +194,14 @@ local function OnLootOpened()
 end
 EW.OnLootOpened = OnLootOpened
 
-EW.RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED", OnCombatLog)
+-- Gated behind caps.combatLog: this is the second ranked cause, thousands of
+-- events an hour, and where the capability is off the listener is never
+-- registered at all rather than registered and made to check on every
+-- event. Loot windows, quests, and vendors keep working either way, because
+-- none of them depends on the combat log.
+if EW.Caps and EW.Caps.combatLog then
+  EW.RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED", OnCombatLog)
+end
 EW.RegisterEvent("LOOT_OPENED", OnLootOpened)
 EW.RegisterEvent("GROUP_ROSTER_UPDATE", RefreshGroup)
 EW.RegisterEvent("PLAYER_ENTERING_WORLD", RefreshGroup)

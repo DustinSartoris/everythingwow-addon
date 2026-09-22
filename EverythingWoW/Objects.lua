@@ -58,8 +58,16 @@ function EW.RecordObjectFromGuid(guid, isNode)
   return EW.Record(kind, subjectType, id, mapId, x, y, nil)
 end
 
---[[ Records the object under the cursor, where the client will name it. ]]
+--[[ Records the object under the cursor, where the client will name it.
+     Gated behind caps.worldCursor: this is the leading cause of the Forever
+     block, and where the capability is off, C_TooltipInfo.GetWorldCursor is
+     never called at all rather than called and caught. ]]
 local function RecordCursorObject()
+  if not (EW.Caps and EW.Caps.worldCursor) then
+    EW.CountIgnored("no_world_cursor")
+    return false
+  end
+
   local data
   local ok = pcall(function()
     if C_TooltipInfo and C_TooltipInfo.GetWorldCursor then
@@ -116,11 +124,15 @@ EW.RecordCursorObject = RecordCursorObject
 
 -- The tooltip showing over the world is the moment the cursor is on an
 -- object. The hook is a script hook on the shared tooltip, which adds no
--- taint and replaces nothing.
-if GameTooltip and GameTooltip.HookScript then
+-- taint and replaces nothing, but it is also the leading cause the
+-- compatibility note names: insecure code running inside a Blizzard frame's
+-- handler, at load, on every tooltip. Where caps.worldCursor is off, the
+-- hook is never installed in the first place, rather than installed and
+-- left to call a capability check on every tooltip show.
+if EW.Caps and EW.Caps.worldCursor and GameTooltip and GameTooltip.HookScript then
   pcall(function()
     GameTooltip:HookScript("OnShow", function()
-      if C_TooltipInfo and C_TooltipInfo.GetWorldCursor then
+      if EW.Caps and EW.Caps.worldCursor and C_TooltipInfo and C_TooltipInfo.GetWorldCursor then
         pcall(RecordCursorObject)
       end
     end)

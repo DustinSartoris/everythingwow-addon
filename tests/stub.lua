@@ -46,6 +46,14 @@ local function CreateFrame(_, name)
   return frame
 end
 
+--[[ Forgets every frame the addon has created so far, so a fresh load of
+     the addon files (a different client, for the capability gate tests)
+     starts from no listeners rather than piling its frame on top of the
+     previous instance's. ]]
+function stub.ResetFrames()
+  frames = {}
+end
+
 --[[ Runs every timer the addon has queued, and any timer those queue in turn,
      which is how the login snapshot's retry loop is driven in a test. ]]
 function stub.RunTimers(rounds)

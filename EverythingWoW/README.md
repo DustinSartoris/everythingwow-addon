@@ -1,10 +1,17 @@
-# Everything WoW Companion 0.1.1
+# Everything WoW Companion 0.2.0
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.1.1. It is free and open source under the MIT license.
+This is version 0.2.0. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.2.0** answers the World of Warcraft: Forever compatibility block reported on 18 September 2026: an alert reading "EverythingWoW has been blocked from an action only available to the Blizzard UI. You can disable this addon and reload the UI," on build 1.60.1, naming no function.
+
+- **A capability table per client.** The addon now reads `EW.Client` from `WOW_PROJECT_ID`, the interface number, and the version string as soon as `Core.lua` loads, rather than assuming every call works until it errors. Forever cannot be told apart from Classic Era by project id alone, since it is expected to answer with the same one, so the client key is read off the version string's major and minor instead: 1.14 and 1.15 read as Classic Era, 1.60 and up read as Forever. A client the table cannot place reads as Forever too, the most restrictive row rather than the most permissive one.
+- **Three capabilities gated, not merely wrapped.** The world cursor tooltip hook (`C_TooltipInfo.GetWorldCursor`, installed inside Blizzard's own tooltip handler), the GUID reader that identifies an NPC or an object, and the combat log listener each sit behind a named capability, and every one of the three defaults off on Forever until an owner's paste proves it safe. Where a capability is off, the restricted call is never made at all: the tooltip hook is never installed, the combat log listener is never registered, and the GUID reader returns nothing rather than pattern matching or comparing what a secret value system may not allow either. The existing `pcall` guards stay in place, because they still catch a changed signature; they were never going to catch this alert, and they still are not what stops it.
+- **Forbidden action reporting.** `ADDON_ACTION_FORBIDDEN` and `ADDON_ACTION_BLOCKED` are now handled when either names this addon: the reported function (or, as on the owner's own Forever alert, the absence of one), the client, and a timestamp are written into the saved file, and the matching capability, or every capability where no function is named, is turned off for the rest of the session. `/ewow status` now prints the client, the capability table, and the last forbidden action recorded.
+- **No table of contents change yet.** Both `## Interface` numbers are unchanged, and no third table of contents file is added. The suffix a Forever client reads is still unproven, and a guessed interface number is exactly the kind of guess this release is against.
 
 **0.1.1** fixes what the first live test on a Retail client showed.
 
@@ -30,7 +37,7 @@ The folder must be named `EverythingWoW`, because the game looks for a table of 
 
 The addon ships two tables of contents. `EverythingWoW.toc` carries `## Interface: 120100` for Retail and `EverythingWoW_Vanilla.toc` carries `## Interface: 11509` for Classic Era and Hardcore. Current clients support both this separate suffixed file and the single file `## Interface-Vanilla:` directive; the separate file is used here because it is also read by older Classic Era builds, which the directive is not, and because a wrong interface number in one file cannot then make the other look out of date.
 
-Forever is not detectable from inside the game. Blizzard has published no `WOW_PROJECT_ID` value for it, so a Forever client is recorded as Classic Era until one exists. When Blizzard ships that value, one line in `Core.lua` changes and nothing else does.
+Blizzard has published no `WOW_PROJECT_ID` value of its own for Forever, so a Forever client is still recorded as Classic Era in the file the site reads, `db.version`, until one exists. That is a separate question from what the addon does while it runs: since 0.2.0 the addon tells Forever apart from Classic Era by its version string, 1.60 and up rather than 1.14 or 1.15, and locks down every restricted call there until it is proven safe, whatever `WOW_PROJECT_ID` says. When Blizzard ships a project id for Forever, one line in `Core.lua` changes `db.version` to match, and nothing about the capability gating has to.
 
 ## Uploading
 
@@ -72,7 +79,7 @@ The map id and the coordinates are the client's own: `C_Map.GetBestMapForUnit("p
 
 | Command | What it does |
 |---|---|
-| `/ewow status` | The counts per kind, the number dropped, and the skipped, deduped, and ignored counts with the reason for each, plus the game version and the patch. |
+| `/ewow status` | The client detected, the capability table, the last forbidden action reported, the counts per kind, the number dropped, and the skipped, deduped, and ignored counts with the reason for each, plus the game version and the patch. |
 | `/ewow clear` | Throws away everything recorded so far. Start here if you would rather not upload something. |
 | `/ewow snapshot` | Records your character snapshot now rather than waiting for the next login. |
 | `/ewow path` | Prints where the file is written. |
@@ -88,7 +95,7 @@ The addon is honest about what it cannot see, because a guessed id would become 
 
 ## Developing and testing
 
-The recorders are plain Lua with no libraries. `addon/tests/run.lua` loads the real addon files against a small stand in for the client, fires the events, asserts the saved shape, and writes a file the way the game writes one. `addon/tests/check-file.mjs` then reads that file with the site's own parser and with the worker's aggregation readers, so the file is proved against both ends rather than against a description of them.
+The recorders are plain Lua with no libraries. `addon/tests/run.lua` loads the real addon files against a small stand in for the client, fires the events, asserts the saved shape, and writes a file the way the game writes one. `addon/tests/check-file.mjs` then reads that file with the site's own parser and with the worker's aggregation readers, so the file is proved against both ends rather than against a description of them. Since 0.2.0, the same script also loads the addon fresh against four simulated clients, Retail, Classic Era, Forever, and one the capability table does not recognize, and asserts that each restricted capability reads correctly for its client and that firing a gated event on Forever writes no observation and raises no error.
 
 ```
 lua5.4 addon/tests/run.lua /tmp/EverythingWoW.lua
