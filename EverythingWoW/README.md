@@ -1,10 +1,15 @@
-# Everything WoW Companion 0.2.2
+# Everything WoW Companion 0.2.3
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.2.2. It is free and open source under the MIT license.
+This is version 0.2.3. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.2.3** sends the `forever` version key for a Forever session. The site's `versions` table has had its `forever` row enabled since 24 September 2026, so the asymmetry 0.2.1 documented is closed.
+
+- **Forever recordings land under Forever.** `EW.VersionKey`, the key written to `db.version`, now answers `forever` whenever `EW.Client` reads as `forever`, that is, a version string of major 1 and minor 60 or above, whatever project id the client carries. The upload's own field therefore reads `forever` for the owner's build 1.60.1 session, and its recordings land in the Forever database rather than Retail's. Retail, Classic Era, Hardcore, and a client the table cannot place answer exactly as they did in 0.2.2.
+- **`db.client` still rides beside it.** It carries the client this addon detected, now the same key as `db.version` for a Forever session, and `/ewow status`'s `game` line still reads it. Nothing else changed: the capability table, the probe, the forbidden handler, and every recorder are exactly as 0.2.2 shipped them.
 
 **0.2.2** settles the Forever capability profile on the owner's own `/ewow probe` transcript, run against 0.2.1 on build 1.60.1: `NAME_PLATE_UNIT_ADDED`, `UPDATE_MOUSEOVER_UNIT`, and `PLAYER_TARGET_CHANGED` came back allowed, `COMBAT_LOG_EVENT_UNFILTERED` and `AUCTION_ITEM_LIST_UPDATE` came back refused, and the owner's own `/ewow cap worldCursor on` and `/ewow cap unitGuid on` afterward raised no alert. The same transcript also showed a second alert the probe itself caused: `ADDON_ACTION_FORBIDDEN` reported for `EverythingWoWFrame:UnregisterEvent()`, which turned every restricted capability off, worldCursor and unitGuid included, on the strength of a refusal 0.2.1 could not place.
 
@@ -54,7 +59,7 @@ The folder must be named `EverythingWoW`, because the game looks for a table of 
 
 The addon ships two tables of contents. `EverythingWoW.toc` carries `## Interface: 120100` for Retail and `EverythingWoW_Vanilla.toc` carries `## Interface: 11509` for Classic Era and Hardcore. Current clients support both this separate suffixed file and the single file `## Interface-Vanilla:` directive; the separate file is used here because it is also read by older Classic Era builds, which the directive is not, and because a wrong interface number in one file cannot then make the other look out of date.
 
-Blizzard has published no `WOW_PROJECT_ID` value of its own for Forever, and the owner's own build 1.60.1 session reads back the mainline id, the same one Retail reports, rather than the Classic id this addon first expected Forever to share. So a Forever client is recorded as Retail, not Classic Era, in `db.version`, the field the site's upload path reads and validates against its own `versions` table, until that table gains a `forever` row of its own. That is a separate question from what the addon does while it runs: since 0.2.0 the addon tells Forever apart from every other client by its version string alone, 1.60 and up rather than 1.14 or 1.15, checked before `WOW_PROJECT_ID` is even asked since 0.2.1, and locks down every restricted call there until it is proven safe, whatever `WOW_PROJECT_ID` says. `db.client` carries this addon's own corrected key, `forever`, beside `db.version`'s `retail`, and `/ewow status`'s `game` line reads `db.client`. When the site's `versions` table gains a `forever` row, one line in `Core.lua` changes `db.version` to match `db.client`, and nothing about the capability gating has to.
+Blizzard has published no `WOW_PROJECT_ID` value of its own for Forever, and the owner's own build 1.60.1 session reads back the mainline id, the same one Retail reports, rather than the Classic id this addon first expected Forever to share. So the addon tells Forever apart from every other client by its version string alone, 1.60 and up rather than 1.14 or 1.15, checked before `WOW_PROJECT_ID` is even asked since 0.2.1, and locks down every restricted call there until it is proven safe, whatever `WOW_PROJECT_ID` says. Since 0.2.3 that same reading decides the upload's attribution: a Forever client is recorded as `forever` in `db.version`, the field the site's upload path reads and validates against its own `versions` table, whose `forever` row has been enabled since 24 September 2026. 0.2.1 and 0.2.2 recorded a Forever session as `retail` there while that row did not exist. `db.client` carries this addon's own detected key beside `db.version`, and `/ewow status`'s `game` line reads it.
 
 ## Uploading
 

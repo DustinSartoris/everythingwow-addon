@@ -12,8 +12,12 @@
  *
  *   node addon/tests/check-file.mjs <file> [app clone] [git ref]
  *
- * The file is any file the addon wrote: the one addon/tests/run.lua writes, or
- * the anonymized live capture in addon/tests/fixtures/live-0.1.0.lua.
+ * The file is any file the addon wrote: either of the two addon/tests/run.lua
+ * writes, the Retail one or the Forever one beside it whose version key is
+ * forever, or the anonymized live capture in addon/tests/fixtures/live-0.1.0.lua.
+ * The site's reader checks the version key's shape rather than a list of
+ * keys; which keys it accepts is decided by the versions table's enabled
+ * rows, so the key is printed on the last line rather than matched here.
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -219,7 +223,8 @@ if (missing.length > 0) console.log(`Not in this file: ${missing.join(", ")}.`);
 
 const summary = summarize(file.observations);
 console.log(
-  `${passed} passed, ${failed} failed. ${file.observations.length} observations read: ` +
+  `${passed} passed, ${failed} failed. Version key ${file.version}. ` +
+    `${file.observations.length} observations read: ` +
     Object.entries(summary)
       .filter(([, count]) => count > 0)
       .map(([kind, count]) => `${kind} ${count}`)

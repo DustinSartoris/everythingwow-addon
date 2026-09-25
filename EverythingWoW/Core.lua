@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.2"
+EW.ADDON_VERSION = "0.2.3"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -87,18 +87,26 @@ Era family for our purposes, where a hardcore realm reports hardcore.
 
 Forever is not detectable by project id. Blizzard has published none of its
 own for it, and the owner's own build 1.60.1 reading came back carrying
-WOW_PROJECT_ID equal to WOW_PROJECT_MAINLINE, the same id Retail reports,
-rather than the Classic id this function was written expecting. This
-function is left unchanged regardless: the site's versions table has no
-enabled row for forever yet (that lands with EW.RunProbe below and a
-version rows change on the site), so an upload has to keep sending a key
-the site already accepts. A Forever session is therefore attributed to
-retail here, not classic_era as first assumed, which is honest about what
-this function alone can tell, though EW.ReadClient below no longer makes
-the same mistake for anything that is not this one saved field: see
-EW.Client and db.client.
+WOW_PROJECT_ID equal to WOW_PROJECT_MAINLINE, the same id Retail reports.
+EW.ReadClient below reads Forever off the version string instead, major 1
+and minor FOREVER_MIN_MINOR or above, whatever project id the client
+carries, and this function asks it first. The site's versions table has
+had its forever row enabled since 24 September 2026, so from 0.2.3 a
+Forever session sends forever in db.version and its recordings land under
+Forever rather than Retail; db.client still rides beside it as the client
+this addon detected. Every other client answers exactly as 0.2.2 did.
+
+This reads EW.Client, which Core.lua builds as it loads, below this
+function's definition but before anything calls it: EW.Database, the only
+caller, first runs on ADDON_LOADED. Should anything ever call this earlier,
+it reads EW.ReadClient itself rather than answering without a client.
 ]]
 function EW.VersionKey()
+  local client = EW.Client or (EW.ReadClient and EW.ReadClient())
+  if client and client.key == "forever" then
+    return "forever"
+  end
+
   local project = rawget(_G, "WOW_PROJECT_ID")
   local mainline = rawget(_G, "WOW_PROJECT_MAINLINE")
   if project == nil or (mainline ~= nil and project == mainline) then
@@ -504,12 +512,12 @@ function EW.Database()
   db.schema = EW.SCHEMA
   db.version = EW.VersionKey()
   -- An extra field beside the upload's version key, not a replacement for
-  -- it: db.version has to stay a key the site's versions table already
-  -- enables, and forever is not one of those yet, so this addon's own
-  -- corrected client detection rides along under its own name instead.
-  -- readCompanionFile in the site's read.ts reads specific keys off this
-  -- table and ignores the rest, so an extra one here is carried, not
-  -- refused.
+  -- it. The site's versions table has had its forever row enabled since 24
+  -- September 2026, so from 0.2.3 db.version sends forever for a Forever
+  -- session, and db.client rides beside it as the client this addon
+  -- detected. readCompanionFile in the site's read.ts reads specific keys
+  -- off this table and ignores the rest, so an extra one here is carried,
+  -- not refused.
   db.client = EW.Client and EW.Client.key or nil
   db.addon = EW.ADDON_VERSION
   db.patch = EW.Patch() or db.patch
@@ -900,10 +908,11 @@ local function Status()
   for _, observation in ipairs(db.observations) do
     counts[observation.kind] = (counts[observation.kind] or 0) + 1
   end
-  -- "game" reads EW.Client.key, not db.version: db.version is the upload's
-  -- own field and has to keep sending a key the site's versions table
-  -- already enables, which is not yet true of forever, while this line is
-  -- read by a person and should say what client this addon actually found.
+  -- "game" reads EW.Client.key, the client this addon detected. From 0.2.3
+  -- db.version, the upload's own field, sends forever for a Forever session
+  -- too, the site's versions table having had its forever row enabled since
+  -- 24 September 2026, and db.client rides beside it; this line keeps
+  -- reading the client key so it says what client this addon actually found.
   EW.Print(string.format("version %s, game %s, patch %s.",
     EW.ADDON_VERSION, tostring(EW.Client and EW.Client.key or db.version), tostring(db.patch)))
   EW.Print(string.format("client %s (interface %s, build %s).",

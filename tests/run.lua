@@ -10,8 +10,10 @@ events the recorders listen for, and assert the shape of EverythingWoWDB: the
 contract's field names, the payload spellings, the caps, the ring buffer, the
 de-duplication rule, and the byte trimming. The last test serializes the
 table the way the game's own SavedVariables writer does and writes it to the
-output file, which defaults to the scratchpad path below. addon/tests/
-check-file.mjs then reads that file with the site's own parser.
+output file, which defaults to the scratchpad path below, and a second file
+from a Forever session beside it, named for the first with -forever before
+its extension. addon/tests/check-file.mjs then reads either file with the
+site's own parser.
 ]]
 
 local root = (arg and arg[0] or "addon/tests/run.lua"):gsub("tests/run%.lua$", "")
@@ -84,7 +86,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.2")
+equal("addon is the addon version", saved.addon, "0.2.3")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -437,6 +439,9 @@ equal("retail's unit guid capability is on", retailGate.Caps.unitGuid, true)
 equal("retail's combat log capability is on", retailGate.Caps.combatLog, true)
 equal("retail's auction capability is on", retailGate.Caps.auction, true)
 check("retail installs the tooltip hook", _G.GameTooltip.OnShow ~= nil)
+-- 0.2.3: the upload's own version key, asserted per client from here on.
+equal("retail's saved version key is retail", retailGate.Database().version, "retail")
+equal("retail's saved client rides beside it", retailGate.Database().client, "retail")
 
 _G.GameTooltip.OnShow = nil
 local classicGate = LoadFreshAddon(2, { "1.15.9", "50000", "Sep 17 2026", 11509 })
@@ -446,6 +451,11 @@ equal("classic era's unit guid capability is on", classicGate.Caps.unitGuid, tru
 equal("classic era's combat log capability is on", classicGate.Caps.combatLog, true)
 equal("classic era's auction capability is on, its own scan being the only path", classicGate.Caps.auction, true)
 check("classic era never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+equal("classic era's saved version key is classic era", classicGate.Database().version, "classic_era")
+stub.state.hardcore = true
+equal("a hardcore realm on the classic era client still saves hardcore",
+  classicGate.Database().version, "hardcore")
+stub.state.hardcore = false
 
 _G.GameTooltip.OnShow = nil
 -- Build 1.60.1 is the owner's own reading, on what the note expects to be
@@ -456,6 +466,8 @@ _G.GameTooltip.OnShow = nil
 -- and AUCTION_ITEM_LIST_UPDATE came back refused.
 local foreverGate = LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
 equal("a 1.60 build on the classic project id reads as forever", foreverGate.Client.key, "forever")
+equal("forever on the classic project id saves the forever version key",
+  foreverGate.Database().version, "forever")
 equal("forever's world cursor capability defaults on, from the owner's probe",
   foreverGate.Caps.worldCursor, true)
 equal("forever's unit guid capability defaults on, from the owner's probe",
@@ -586,6 +598,12 @@ equal("an unknown client defaults the unit guid capability off", unknownGate.Cap
 equal("an unknown client defaults the combat log capability off", unknownGate.Caps.combatLog, false)
 equal("an unknown client defaults the auction capability off", unknownGate.Caps.auction, false)
 check("an unknown client never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+-- 0.2.3 changes nothing here: an unknown client is not forever, so its
+-- version key answers exactly as it did in 0.2.2, off the project id alone,
+-- and a project id other than the mainline one reads as classic era.
+equal("an unknown client's version key is unchanged from 0.2.2", unknownGate.VersionKey(), "classic_era")
+equal("an unknown client's saved version key is unchanged too", unknownGate.Database().version, "classic_era")
+equal("an unknown client's saved client key stays unknown", unknownGate.Database().client, "unknown")
 
 --[[
 0.2.1: Forever is read off the version string before WOW_PROJECT_ID is even
@@ -612,6 +630,28 @@ equal("forever's auction capability defaults off on the mainline project id too"
   foreverOnMainline.Caps.auction, false)
 check("forever on the mainline project id installs the tooltip hook too",
   _G.GameTooltip.OnShow ~= nil)
+
+--[[
+0.2.3: the owner's own session, build 1.60.1 on the mainline project id,
+sends the forever version key. The site's versions table has had its forever
+row enabled since 24 September 2026, so db.version no longer holds retail for
+this session, and db.client rides beside it with the same key.
+]]
+equal("forever on the mainline project id has the forever version key",
+  foreverOnMainline.VersionKey(), "forever")
+equal("forever on the mainline project id saves forever as db.version",
+  foreverOnMainline.Database().version, "forever")
+equal("forever on the mainline project id saves forever as db.client",
+  foreverOnMainline.Database().client, "forever")
+do
+  stub.state.printed = {}
+  foreverOnMainline.SlashCommand("status")
+  local text = table.concat(stub.state.printed, "\n")
+  check("status still reads game forever for the owner's own session",
+    text:find("game forever", 1, true) ~= nil, text)
+  check("status prints the 0.2.3 addon version",
+    text:find("version 0.2.3", 1, true) ~= nil, text)
+end
 
 --[[
 Attributing a RegisterEvent refusal to the exact event being registered,
@@ -940,6 +980,41 @@ file:write("\nEverythingWoWDB = " .. Serialize(db(), 0) .. "\n")
 file:close()
 
 check("the written file holds every kind the run recorded", #observations() >= 7, #observations())
-print(string.format("%d passed, %d failed. File written to %s with %d observations.",
-  passed, failed, outputPath, #observations()))
+local mainCount = #observations()
+
+--[[
+0.2.3: a second file from a Forever session, the owner's own build 1.60.1 on
+the mainline project id, so check-file.mjs can prove the site's parser
+reads its forever version key. Combat log and auction are off on Forever, so
+this file holds what that client actually records: an npc sighting, a quest
+start, a vendor, a loot window read off its own source guid, an object, and
+a snapshot.
+]]
+local foreverOutputPath = (outputPath:gsub("%.lua$", "")) .. "-forever.lua"
+_G.GameTooltip.OnShow = nil
+local foreverFile = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 11, isPlayer = true }
+foreverFile.SlashCommand("clear")
+stub.state.units.nameplate1 = {
+  guid = "Creature-0-3888-0-11-2914-000136DF91", name = "Kobold Vermin",
+  level = 3, reaction = 2, classification = "normal",
+}
+stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+stub.Fire("QUEST_DETAIL")
+stub.Fire("MERCHANT_SHOW")
+stub.state.loot = { { id = 2589, quantity = 2, source = "Creature-0-3888-0-11-2914-000136DF96" } }
+stub.Fire("LOOT_OPENED")
+foreverFile.RecordObjectFromGuid("GameObject-0-3888-0-11-1731-000136DF98", true)
+foreverFile.TakeSnapshot(true)
+local foreverDb = foreverFile.Database()
+equal("the forever file's version key is forever", foreverDb.version, "forever")
+equal("the forever file's client key is forever", foreverDb.client, "forever")
+equal("the forever file carries the 0.2.3 addon version", foreverDb.addon, "0.2.3")
+check("the forever file holds what that client records", #foreverDb.observations >= 5, #foreverDb.observations)
+local foreverHandle = assert(io.open(foreverOutputPath, "w"))
+foreverHandle:write("\nEverythingWoWDB = " .. Serialize(foreverDb, 0) .. "\n")
+foreverHandle:close()
+
+print(string.format("%d passed, %d failed. File written to %s with %d observations, and %s with %d.",
+  passed, failed, outputPath, mainCount, foreverOutputPath, #foreverDb.observations))
 if failed > 0 then os.exit(1) end
