@@ -74,7 +74,7 @@ The game writes it when you log out or reload the interface, so log out first. T
 
 ## Source and Releases
 
-The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A release is a tag on that repository, `v` followed by the version both tables of contents carry, and each tag is packaged into the `EverythingWoW` folder the stores offer: on CurseForge at <https://www.curseforge.com/wow/addons/everything-wow-companion> and on Wago, whose address is added here when the project exists. Both tables of contents carry `X-Curse-Project-ID`; the `X-Wago-ID` line is added when the Wago project exists.
+The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A release is a tag on that repository, `v` followed by the version both tables of contents carry, and each tag is packaged into the `EverythingWoW` folder the stores offer: on CurseForge at <https://www.curseforge.com/wow/addons/everything-wow-companion> and on Wago at <https://addons.wago.io/addons/everythingwow-addon>. Both tables of contents carry `X-Curse-Project-ID` and `X-Wago-ID`.
 
 ## What is recorded
 

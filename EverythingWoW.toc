@@ -8,6 +8,7 @@
 ## X-Website: https://everythingwow.com/addons/companion
 ## X-Category: Data Export
 ## X-Curse-Project-ID: 1713336
+## X-Wago-ID: kGr9yAKy
 ## IconTexture: Interface\ICONS\INV_Misc_Book_09
 
 Core.lua
