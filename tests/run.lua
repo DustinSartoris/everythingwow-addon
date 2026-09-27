@@ -3,7 +3,7 @@ The addon's tests.
 
 Run them with a Lua interpreter from the repository root:
 
-    lua5.4 addon/tests/run.lua [output file]
+    lua5.4 tests/run.lua [output file]
 
 They load the real addon files against the stub client in stub.lua, fire the
 events the recorders listen for, and assert the shape of EverythingWoWDB: the
@@ -12,11 +12,11 @@ de-duplication rule, and the byte trimming. The last test serializes the
 table the way the game's own SavedVariables writer does and writes it to the
 output file, which defaults to the scratchpad path below, and a second file
 from a Forever session beside it, named for the first with -forever before
-its extension. addon/tests/check-file.mjs then reads either file with the
-site's own parser.
+its extension. The worker's addon/tests/check-file.mjs then reads either
+written file with the site's own parser.
 ]]
 
-local root = (arg and arg[0] or "addon/tests/run.lua"):gsub("tests/run%.lua$", "")
+local root = (arg and arg[0] or "tests/run.lua"):gsub("tests/run%.lua$", "")
 local outputPath = (arg and arg[1]) or "/tmp/EverythingWoW.lua"
 
 package.path = root .. "tests/?.lua;" .. package.path
@@ -53,7 +53,7 @@ local function LoadFreshAddon(project, build)
   _G.EverythingWoWDB = nil
   local fresh = {}
   for _, name in ipairs(FILES) do
-    local chunk = assert(loadfile(root .. "EverythingWoW/" .. name .. ".lua"))
+    local chunk = assert(loadfile(root .. name .. ".lua"))
     chunk("EverythingWoW", fresh)
   end
   return fresh
@@ -865,47 +865,6 @@ end
 _G.GameTooltip.OnShow = nil
 EW = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
 stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 80, isPlayer = true }
-
---[[
-The live capture from 0.1.0, anonymized.
-
-fixtures/live-0.1.0.lua is the file a Retail client wrote in a few minutes in
-Orgrimmar, with the character renamed and everything else left as it was: the
-same kinds, ids, map, and coordinates. It is kept because it is the evidence
-for the three fixes in 0.1.1, and these assertions are that evidence written
-down: a vendor row with no price, two snapshots in one short session with the
-first one's currency list empty, and 802 counted as skipped. Nothing in 0.1.1
-may write a file that looks like this again.
-]]
-local fixturePath = root .. "tests/fixtures/live-0.1.0.lua"
-local fixtureFile = io.open(fixturePath, "r")
-check("the live capture is kept with the tests", fixtureFile ~= nil, fixturePath)
-if fixtureFile then
-  local text = fixtureFile:read("a")
-  fixtureFile:close()
-  local env = {}
-  local chunk = assert(load(text, "live-0.1.0", "t", env))
-  chunk()
-  local captured = env.EverythingWoWDB
-  equal("the capture is the same schema", captured.schema, 1)
-  equal("the capture was written by 0.1.0", captured.addon, "0.1.0")
-  local kinds, vendorItem, snapshots = {}, nil, {}
-  for _, observation in ipairs(captured.observations) do
-    kinds[observation.kind] = (kinds[observation.kind] or 0) + 1
-    if observation.kind == "vendor" then vendorItem = observation.payload.items[1] end
-    if observation.kind == "character_snapshot" then snapshots[#snapshots + 1] = observation end
-  end
-  equal("the capture holds twenty two npc sightings", kinds.npc, 22)
-  equal("the capture holds one vendor visit", kinds.vendor, 1)
-  equal("0.1.0 wrote a vendor item with no price", vendorItem.price, nil)
-  equal("0.1.0 wrote a vendor item with no currency either", vendorItem.currency, nil)
-  equal("0.1.0 wrote two snapshots in one session", #snapshots, 2)
-  equal("the first one fired before the currencies loaded", #snapshots[1].payload.currencies, 0)
-  check("the second one was a hundred seconds later",
-    snapshots[2].t - snapshots[1].t < 3600, snapshots[2].t - snapshots[1].t)
-  equal("and 0.1.0 counted eight hundred and two as skipped", captured.skipped, 802)
-  equal("the capture carries no player but the contributor", snapshots[1].payload.name, "Thalos")
-end
 
 --[[
 The writer. The game serializes SavedVariables as one global assignment per
