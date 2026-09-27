@@ -1,0 +1,9 @@
+package-as: EverythingWoW
+
+ignore:
+  - tests
+  - .github
+  - .pkgmeta
+  - README.md
+
+license-output: LICENSE.txt

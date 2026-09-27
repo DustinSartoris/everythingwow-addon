@@ -46,7 +46,7 @@ This is version 0.2.3. It is free and open source under the MIT license.
 ## Installing
 
 1. Close World of Warcraft.
-2. Copy the `EverythingWoW` folder into your addons folder:
+2. Copy the `EverythingWoW` folder from a release package into your addons folder, or clone this repository into a folder of that name there:
    - Windows: `C:\Program Files (x86)\World of Warcraft\_retail_\Interface\AddOns\EverythingWoW`
    - macOS: `/Applications/World of Warcraft/_retail_/Interface/AddOns/EverythingWoW`
    - On Classic Era, replace `_retail_` with `_classic_era_`.
@@ -71,6 +71,10 @@ The file lives here, where `<ACCOUNT>` is your Battle.net account folder:
 The game writes it when you log out or reload the interface, so log out first. Then open <https://everythingwow.com/addons/companion/upload>, drag the file onto the page, and read the summary it shows you before you send anything. The file is read in your browser; nothing is sent until you press Upload. Sign in first if you want your uploads credited to you, or upload without signing in.
 
 `/ewow path` prints the folder in game.
+
+## Source and Releases
+
+The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A release is a tag on that repository, `v` followed by the version both tables of contents carry, and each tag is packaged into the `EverythingWoW` folder the stores offer: on CurseForge at <https://www.curseforge.com/wow/addons/everything-wow-companion> and on Wago, whose address is added here when the project exists. The `X-Curse-Project-ID` and `X-Wago-ID` lines are added to both tables of contents when those ids are known.
 
 ## What is recorded
 
@@ -119,11 +123,12 @@ The addon is honest about what it cannot see, because a guessed id would become 
 
 ## Developing and testing
 
-The recorders are plain Lua with no libraries. `addon/tests/run.lua` loads the real addon files against a small stand in for the client, fires the events, asserts the saved shape, and writes a file the way the game writes one. `addon/tests/check-file.mjs` then reads that file with the site's own parser and with the worker's aggregation readers, so the file is proved against both ends rather than against a description of them. Since 0.2.0, the same script also loads the addon fresh against four simulated clients, Retail, Classic Era, Forever, and one the capability table does not recognize, and asserts that each restricted capability reads correctly for its client; since 0.2.2, Forever's own profile has `worldCursor` and `unitGuid` on, so firing one of those gated events there is asserted to write an observation rather than nothing, while `combatLog` and `auction` stay off and their events are asserted to write nothing and raise no error. Since 0.2.1, `stub.state.forbiddenEvents` makes the stand in client refuse one named event's registration the way the owner's own Forever session refused `RegisterEvent()`, which the tests use to prove that a Forever session carrying the mainline project id still reads as `forever`, that the refusal is attributed to the exact event rather than to every capability, and that `/ewow probe` prints and saves one line per event. Since 0.2.2, `stub.state.forbiddenUnregisterEvents` and `stub.state.unregisterAttempts` reproduce the owner's own second alert, naming `EverythingWoWFrame:UnregisterEvent()`, and the tests use them to prove a refused registration is never followed by an unregister call at all and that a refused unregister is still attributed to its own event rather than falling back to every capability off.
+The recorders are plain Lua with no libraries. `tests/run.lua` loads the real addon files against a small stand in for the client, fires the events, asserts the saved shape, and writes a file the way the game writes one. The Everything WoW worker's `addon/tests/check-file.mjs`, which stays with the site's code because it reads the site's parser out of the application repository, then reads that file with the site's own parser and with the worker's aggregation readers, so the file is proved against both ends rather than against a description of them. Since 0.2.0, `tests/run.lua` also loads the addon fresh against four simulated clients, Retail, Classic Era, Forever, and one the capability table does not recognize, and asserts that each restricted capability reads correctly for its client; since 0.2.2, Forever's own profile has `worldCursor` and `unitGuid` on, so firing one of those gated events there is asserted to write an observation rather than nothing, while `combatLog` and `auction` stay off and their events are asserted to write nothing and raise no error. Since 0.2.1, `stub.state.forbiddenEvents` makes the stand in client refuse one named event's registration the way the owner's own Forever session refused `RegisterEvent()`, which the tests use to prove that a Forever session carrying the mainline project id still reads as `forever`, that the refusal is attributed to the exact event rather than to every capability, and that `/ewow probe` prints and saves one line per event. Since 0.2.2, `stub.state.forbiddenUnregisterEvents` and `stub.state.unregisterAttempts` reproduce the owner's own second alert, naming `EverythingWoWFrame:UnregisterEvent()`, and the tests use them to prove a refused registration is never followed by an unregister call at all and that a refused unregister is still attributed to its own event rather than falling back to every capability off.
 
 ```
-lua5.4 addon/tests/run.lua /tmp/EverythingWoW.lua
-node addon/tests/check-file.mjs /tmp/EverythingWoW.lua
+lua5.4 tests/run.lua /tmp/EverythingWoW.lua
 ```
 
-`addon/tests/fixtures/live-0.1.0.lua` is a file a live Retail client wrote with 0.1.0, with the character renamed and everything else left as it stood. It is the evidence for the three fixes above and the tests assert its shape, so no later version may quietly write a file that looks like it again. Running `node addon/tests/check-file.mjs addon/tests/fixtures/live-0.1.0.lua` shows what the site made of it: all 28 observations accepted, none refused, and the vendor row the only thing missing a price.
+The run writes a second file from a Forever session beside the first, `/tmp/EverythingWoW-forever.lua`, and the worker's `node addon/tests/check-file.mjs <file>` reads either one.
+
+The worker also keeps `addon/tests/fixtures/live-0.1.0.lua`, a file a live Retail client wrote with 0.1.0, with the character renamed and everything else left as it stood. It is the evidence for the three fixes above, so no later version may quietly write a file that looks like it again. Running `node addon/tests/check-file.mjs addon/tests/fixtures/live-0.1.0.lua` in the worker shows what the site made of it: all 28 observations accepted, none refused, and the vendor row the only thing missing a price.

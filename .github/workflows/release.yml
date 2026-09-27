@@ -1,0 +1,70 @@
+# Packages a pushed v* tag with the BigWigs packager and uploads it to Wago
+# alone. CurseForge packages the same tag through the repository webhook, so
+# this workflow never uploads there, and it uploads to neither WoWInterface
+# nor a GitHub release.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag against both tables of contents
+        shell: bash
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          status=0
+          for toc in EverythingWoW.toc EverythingWoW_Vanilla.toc; do
+            version="$(sed -n 's/^## Version:[[:space:]]*//p' "$toc" | tr -d '\r' | sed 's/[[:space:]]*$//')"
+            if [ "$version" = "$expected" ]; then
+              echo "$toc carries ## Version: $version, which matches $GITHUB_REF_NAME."
+            else
+              echo "::error file=$toc::## Version reads '$version', but the tag $GITHUB_REF_NAME needs '$expected'."
+              status=1
+            fi
+          done
+          exit "$status"
+
+      - name: Resolve the Wago project id and check the token
+        id: wago
+        shell: bash
+        env:
+          WAGO_PROJECT_ID: ${{ vars.WAGO_PROJECT_ID }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+        run: |
+          if [ -z "$WAGO_API_TOKEN" ]; then
+            echo "::error::The WAGO_API_TOKEN repository secret is not set, so the packager would upload nowhere. Add it under Settings, Secrets and variables, Actions, Secrets."
+            exit 1
+          fi
+          id="$WAGO_PROJECT_ID"
+          if [ -z "$id" ]; then
+            id="$(sed -n 's/^## X-Wago-ID:[[:space:]]*//p' EverythingWoW.toc | tr -d '\r' | sed 's/[[:space:]]*$//')"
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::No Wago project id: set the WAGO_PROJECT_ID repository variable under Settings, Secrets and variables, Actions, Variables, or add ## X-Wago-ID to both tables of contents."
+            exit 1
+          fi
+          if ! printf '%s' "$id" | grep -Eq '^[A-Za-z0-9]+$'; then
+            echo "::error::The Wago project id '$id' is not the letters and digits a Wago id is made of."
+            exit 1
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Package and upload to Wago
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -p 0 -w 0 -a ${{ steps.wago.outputs.id }}
+        env:
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
