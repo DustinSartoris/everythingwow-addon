@@ -98,7 +98,10 @@ cannot disagree for any of the three. Only after that does it fall through
 to the project id rules every earlier version used: WOW_PROJECT_MAINLINE is
 Retail, and every other project is in the Classic Era family for our
 purposes, where a hardcore realm reports hardcore. A client EW.ReadClient
-reads as unknown takes that same fall through, exactly as it did in 0.2.3.
+reads as unknown sends unknown, which the site's upload page refuses because
+its versions table holds no such row: 0.2.3 sent classic_era for such a
+session, so a Wrath of the Lich King or Cataclysm Classic client loaded past
+its declared versions would have filed its recordings under Classic Era.
 
 The site's versions table has had its forever row enabled since 24
 September 2026, and its classic_tbc and classic_mop rows were enabled when
@@ -111,7 +114,7 @@ function's definition but before anything calls it: EW.Database, the only
 caller, first runs on ADDON_LOADED. Should anything ever call this earlier,
 it reads EW.ReadClient itself rather than answering without a client.
 ]]
-local VERSION_STRING_KEYS = { forever = true, classic_tbc = true, classic_mop = true }
+local VERSION_STRING_KEYS = { forever = true, classic_tbc = true, classic_mop = true, unknown = true }
 
 function EW.VersionKey()
   local client = EW.Client or (EW.ReadClient and EW.ReadClient())

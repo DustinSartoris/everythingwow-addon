@@ -518,6 +518,8 @@ equal("its combat log capability is off too", wrathGate.Caps.combatLog, false)
 _G.GameTooltip.OnShow = nil
 local cataGate = LoadFreshAddon(14, { "4.4.2", "60000", "Sep 17 2026", 40402 })
 equal("a 4.4 build reads as unknown, the site holding no cataclysm row", cataGate.Client.key, "unknown")
+equal("a 4.4 build's upload key is unknown rather than classic_era", cataGate.VersionKey(), "unknown")
+equal("a 3.4 build's upload key is unknown rather than classic_era", wrathGate.VersionKey(), "unknown")
 
 _G.GameTooltip.OnShow = nil
 -- Build 1.60.1 is the owner's own reading, on what the note expects to be
@@ -663,8 +665,8 @@ check("an unknown client never installs the tooltip hook", _G.GameTooltip.OnShow
 -- 0.2.3 changes nothing here: an unknown client is not forever, so its
 -- version key answers exactly as it did in 0.2.2, off the project id alone,
 -- and a project id other than the mainline one reads as classic era.
-equal("an unknown client's version key is unchanged from 0.2.2", unknownGate.VersionKey(), "classic_era")
-equal("an unknown client's saved version key is unchanged too", unknownGate.Database().version, "classic_era")
+equal("an unknown client's version key is unknown, which the site refuses", unknownGate.VersionKey(), "unknown")
+equal("an unknown client's saved version key is unknown too", unknownGate.Database().version, "unknown")
 equal("an unknown client's saved client key stays unknown", unknownGate.Database().client, "unknown")
 
 --[[
