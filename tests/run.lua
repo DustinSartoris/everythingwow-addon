@@ -10,10 +10,11 @@ events the recorders listen for, and assert the shape of EverythingWoWDB: the
 contract's field names, the payload spellings, the caps, the ring buffer, the
 de-duplication rule, and the byte trimming. The last test serializes the
 table the way the game's own SavedVariables writer does and writes it to the
-output file, which defaults to the scratchpad path below, and a second file
-from a Forever session beside it, named for the first with -forever before
-its extension. The worker's addon/tests/check-file.mjs then reads either
-written file with the site's own parser.
+output file, which defaults to the scratchpad path below, and three more
+beside it, from a Forever, a Burning Crusade Classic, and a Mists Classic
+session, named for the first with -forever, -tbc, and -mists before its
+extension. The worker's addon/tests/check-file.mjs then reads any written
+file with the site's own parser.
 ]]
 
 local root = (arg and arg[0] or "tests/run.lua"):gsub("tests/run%.lua$", "")
@@ -86,7 +87,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.3")
+equal("addon is the addon version", saved.addon, "0.2.4")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -428,8 +429,10 @@ EW.Client and EW.Caps are built once when Core.lua loads and the tooltip
 hook and the combat log registration in the other files run in that same
 pass, before any event can fire. A single already loaded instance cannot be
 re-pointed at a different client, so this proves the gates by loading the
-real files four times over: Retail, Classic Era, Forever, and a client the
-table does not recognize at all.
+real files once per client: Retail, Classic Era, Burning Crusade Classic
+Anniversary and Mists of Pandaria Classic (from 0.2.4), Forever, a client
+the site holds no row for, and a client the table does not recognize at
+all.
 ]]
 _G.GameTooltip.OnShow = nil
 local retailGate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
@@ -456,6 +459,65 @@ stub.state.hardcore = true
 equal("a hardcore realm on the classic era client still saves hardcore",
   classicGate.Database().version, "hardcore")
 stub.state.hardcore = false
+
+--[[
+0.2.4: Burning Crusade Classic Anniversary (2.5.6) and Mists of Pandaria
+Classic (5.5.4), each on its own project id, neither of them the mainline
+one. 0.2.3 read both as classic_era and wrote classic_era into db.version,
+so their recordings would have landed under Classic Era. Each now reads its
+own key, saves it in both db.version and db.client, and carries the Classic
+Era capability row.
+]]
+local function CheckClassicClient(label, project, build, key)
+  _G.GameTooltip.OnShow = nil
+  local gate = LoadFreshAddon(project, build)
+  equal(label .. " reads as " .. key, gate.Client.key, key)
+  equal(label .. "'s version key is " .. key, gate.VersionKey(), key)
+  equal(label .. "'s saved version key is " .. key, gate.Database().version, key)
+  equal(label .. "'s saved client rides beside it", gate.Database().client, key)
+  equal(label .. "'s world cursor capability is off", gate.Caps.worldCursor, false)
+  equal(label .. "'s unit guid capability is on", gate.Caps.unitGuid, true)
+  equal(label .. "'s combat log capability is on", gate.Caps.combatLog, true)
+  equal(label .. "'s auction capability is on", gate.Caps.auction, true)
+  check(label .. " never installs the tooltip hook", _G.GameTooltip.OnShow == nil)
+  -- The hardcore rule belongs to the Classic Era family alone, so a hardcore
+  -- reading cannot pull either client's key back to hardcore.
+  stub.state.hardcore = true
+  equal(label .. " keeps its own version key on a hardcore reading", gate.Database().version, key)
+  stub.state.hardcore = false
+  stub.state.printed = {}
+  gate.SlashCommand("status")
+  local text = table.concat(stub.state.printed, "\n")
+  check(label .. "'s status prints its game key", text:find("game " .. key, 1, true) ~= nil, text)
+  check(label .. "'s status prints its client line", text:find("client " .. key .. " (interface", 1, true) ~= nil, text)
+  return gate
+end
+
+local tbcGate = CheckClassicClient("burning crusade classic", _G.WOW_PROJECT_BURNING_CRUSADE_CLASSIC,
+  { "2.5.6", "63000", "Sep 17 2026", 20506 }, "classic_tbc")
+equal("burning crusade classic keeps its interface for status", tbcGate.Client.interface, 20506)
+local mopGate = CheckClassicClient("mists classic", _G.WOW_PROJECT_MISTS_CLASSIC,
+  { "5.5.4", "64000", "Sep 17 2026", 50504 }, "classic_mop")
+equal("mists classic keeps its interface for status", mopGate.Client.interface, 50504)
+
+-- A 2.5 or 5.5 version string on the mainline project id is still Retail's
+-- rule, as it always was: the project id check comes first for everything
+-- but Forever.
+_G.GameTooltip.OnShow = nil
+local mainlineTwo = LoadFreshAddon(1, { "2.5.6", "63000", "Sep 17 2026", 20506 })
+equal("a 2.5 build on the mainline project id reads as retail", mainlineTwo.Client.key, "retail")
+
+-- Wrath of the Lich King and Cataclysm Classic have no row on the site, so a
+-- 3.4 or 4.4 session is not declared and reads as unknown, with the unknown
+-- row's capabilities, rather than as Classic Era.
+_G.GameTooltip.OnShow = nil
+local wrathGate = LoadFreshAddon(11, { "3.4.4", "60000", "Sep 17 2026", 30404 })
+equal("a 3.4 build reads as unknown, the site holding no wrath row", wrathGate.Client.key, "unknown")
+equal("its unit guid capability is off, the unknown row", wrathGate.Caps.unitGuid, false)
+equal("its combat log capability is off too", wrathGate.Caps.combatLog, false)
+_G.GameTooltip.OnShow = nil
+local cataGate = LoadFreshAddon(14, { "4.4.2", "60000", "Sep 17 2026", 40402 })
+equal("a 4.4 build reads as unknown, the site holding no cataclysm row", cataGate.Client.key, "unknown")
 
 _G.GameTooltip.OnShow = nil
 -- Build 1.60.1 is the owner's own reading, on what the note expects to be
@@ -649,8 +711,8 @@ do
   local text = table.concat(stub.state.printed, "\n")
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
-  check("status prints the 0.2.3 addon version",
-    text:find("version 0.2.3", 1, true) ~= nil, text)
+  check("status prints the 0.2.4 addon version",
+    text:find("version 0.2.4", 1, true) ~= nil, text)
 end
 
 --[[
@@ -968,12 +1030,62 @@ foreverFile.TakeSnapshot(true)
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.3 addon version", foreverDb.addon, "0.2.3")
+equal("the forever file carries the 0.2.4 addon version", foreverDb.addon, "0.2.4")
 check("the forever file holds what that client records", #foreverDb.observations >= 5, #foreverDb.observations)
 local foreverHandle = assert(io.open(foreverOutputPath, "w"))
 foreverHandle:write("\nEverythingWoWDB = " .. Serialize(foreverDb, 0) .. "\n")
 foreverHandle:close()
 
-print(string.format("%d passed, %d failed. File written to %s with %d observations, and %s with %d.",
-  passed, failed, outputPath, mainCount, foreverOutputPath, #foreverDb.observations))
+--[[
+0.2.4: a Burning Crusade Classic file and a Mists Classic file, so
+check-file.mjs can prove the site's parser reads classic_tbc and
+classic_mop. Both clients carry the Classic Era row, so each records what
+Classic Era records: an npc sighting, a quest start, a vendor on the
+positional merchant api, a kill and its loot, an object, a snapshot, and an
+auction page off the scan.
+]]
+local function WriteClassicFile(suffix, project, build, key)
+  local path = (outputPath:gsub("%.lua$", "")) .. "-" .. suffix .. ".lua"
+  _G.GameTooltip.OnShow = nil
+  local addon = LoadFreshAddon(project, build)
+  stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 60, isPlayer = true }
+  addon.SlashCommand("clear")
+  stub.state.merchantApi = "legacy"
+  stub.state.units.nameplate1 = {
+    guid = "Creature-0-3888-0-11-2914-000136DF91", name = "Kobold Vermin",
+    level = 3, reaction = 2, classification = "normal",
+  }
+  stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+  stub.Fire("QUEST_DETAIL")
+  stub.Fire("MERCHANT_SHOW")
+  stub.state.loot = { { id = 2589, quantity = 2, source = "Creature-0-3888-0-11-2914-000136DF97" } }
+  stub.state.combatLog = { subevent = "UNIT_DIED", destGuid = "Creature-0-3888-0-11-2914-000136DF97" }
+  stub.state.units.target = { guid = "Creature-0-3888-0-11-2914-000136DF97" }
+  stub.Fire("COMBAT_LOG_EVENT_UNFILTERED")
+  stub.Fire("LOOT_OPENED")
+  addon.RecordObjectFromGuid("GameObject-0-3888-0-11-1731-000136DF99", true)
+  addon.TakeSnapshot(true)
+  stub.Fire("AUCTION_ITEM_LIST_UPDATE")
+  stub.state.merchantApi = "modern"
+  local saved = addon.Database()
+  equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
+  equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
+  equal("the " .. suffix .. " file carries the 0.2.4 addon version", saved.addon, "0.2.4")
+  local kinds = {}
+  for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
+  check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)
+  check("the " .. suffix .. " file holds a kill's loot", kinds.loot == true)
+  check("the " .. suffix .. " file holds what that client records", #saved.observations >= 7, #saved.observations)
+  local handle = assert(io.open(path, "w"))
+  handle:write("\nEverythingWoWDB = " .. Serialize(saved, 0) .. "\n")
+  handle:close()
+  return path, #saved.observations
+end
+
+local tbcOutputPath, tbcCount = WriteClassicFile("tbc", 5, { "2.5.6", "63000", "Sep 17 2026", 20506 }, "classic_tbc")
+local mopOutputPath, mopCount = WriteClassicFile("mists", 19, { "5.5.4", "64000", "Sep 17 2026", 50504 }, "classic_mop")
+
+print(string.format("%d passed, %d failed. File written to %s with %d observations, %s with %d, %s with %d, and %s with %d.",
+  passed, failed, outputPath, mainCount, foreverOutputPath, #foreverDb.observations,
+  tbcOutputPath, tbcCount, mopOutputPath, mopCount))
 if failed > 0 then os.exit(1) end

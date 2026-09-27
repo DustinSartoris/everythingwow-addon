@@ -125,6 +125,12 @@ function stub.Install(env)
   env.WOW_PROJECT_ID = stub.state.project
   env.WOW_PROJECT_MAINLINE = 1
   env.WOW_PROJECT_CLASSIC = 2
+  -- The project ids Burning Crusade Classic Anniversary and Mists of
+  -- Pandaria Classic report, so the tests can load the addon against each
+  -- one with its own id. Neither is the mainline id, which is all the addon
+  -- itself ever asks of a project id.
+  env.WOW_PROJECT_BURNING_CRUSADE_CLASSIC = 5
+  env.WOW_PROJECT_MISTS_CLASSIC = 19
   env.GOLD_AMOUNT = "%d Gold"
   env.SILVER_AMOUNT = "%d Silver"
   env.COPPER_AMOUNT = "%d Copper"
