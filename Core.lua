@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.4"
+EW.ADDON_VERSION = "0.2.5"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -81,40 +81,51 @@ end
 
 --[[
 The game version key, which is one of the keys the site's versions table
-holds: retail, classic_era, hardcore, classic_tbc, classic_mop, and forever.
-WOW_PROJECT_ID is the only documented way a client says which game it is,
-but it cannot tell the classic clients apart from one another, and the
-owner's own build 1.60.1 reading came back carrying WOW_PROJECT_ID equal to
-WOW_PROJECT_MAINLINE, the same id Retail reports, so it cannot place Forever
-either.
+holds: retail, classic_era, hardcore, classic_tbc, classic_wrath,
+classic_cata, classic_mop, and forever. WOW_PROJECT_ID is the only
+documented way a client says which game it is, but it cannot tell the
+classic clients apart from one another, and the owner's own build 1.60.1
+reading came back carrying WOW_PROJECT_ID equal to WOW_PROJECT_MAINLINE, the
+same id Retail reports, so it cannot place Forever either.
 
 This function therefore reads the client key EW.ReadClient below found
-first, and answers with it outright for the three clients only the version
-string can name: forever (major 1 and minor FOREVER_MIN_MINOR or above,
-whatever project id the client carries), classic_tbc (major 2, Burning
-Crusade Classic Anniversary), and classic_mop (major 5, Mists of Pandaria
-Classic). Since both functions read the same key, db.version and db.client
-cannot disagree for any of the three. Only after that does it fall through
-to the project id rules every earlier version used: WOW_PROJECT_MAINLINE is
-Retail, and every other project is in the Classic Era family for our
-purposes, where a hardcore realm reports hardcore. A client EW.ReadClient
-reads as unknown sends unknown, which the site's upload page refuses because
-its versions table holds no such row: 0.2.3 sent classic_era for such a
-session, so a Wrath of the Lich King or Cataclysm Classic client loaded past
-its declared versions would have filed its recordings under Classic Era.
+first, and answers with it outright for the clients only the version string
+can name: forever (major 1 and minor FOREVER_MIN_MINOR or above, whatever
+project id the client carries), classic_tbc (major 2, Burning Crusade
+Classic Anniversary), classic_wrath (major 3, Wrath of the Lich King
+Classic), classic_cata (major 4, Cataclysm Classic), and classic_mop (major
+5, Mists of Pandaria Classic). Since both functions read the same key,
+db.version and db.client cannot disagree for any of them. Only after that
+does it fall through to the project id rules every earlier version used:
+WOW_PROJECT_MAINLINE is Retail, and every other project is in the Classic
+Era family for our purposes, where a hardcore realm reports hardcore. A
+client EW.ReadClient reads as unknown sends unknown, which the site's upload
+page refuses because its versions table holds no such row: 0.2.3 sent
+classic_era for such a session, so its recordings would have filed under
+Classic Era.
 
 The site's versions table has had its forever row enabled since 24
 September 2026, and its classic_tbc and classic_mop rows were enabled when
 read on 27 September 2026, so from 0.2.4 a Burning Crusade Classic or Mists
 Classic session sends its own key in db.version and its recordings land
-under that client rather than under Classic Era, where 0.2.3 put them.
+under that client rather than under Classic Era, where 0.2.3 put them. Its
+classic_wrath and classic_cata rows were added on 28 September 2026 and left
+disabled, and the site's upload path reads every versions row whether or
+not it is enabled, so from 0.2.5 a Wrath of the Lich King Classic or
+Cataclysm Classic session sends its own key and its upload is accepted,
+where 0.2.4 sent unknown and the site refused it. Neither client is
+declared in a table of contents, since neither can be played in a region
+the site reads, and no page of the site shows either dataset.
 
 This reads EW.Client, which Core.lua builds as it loads, below this
 function's definition but before anything calls it: EW.Database, the only
 caller, first runs on ADDON_LOADED. Should anything ever call this earlier,
 it reads EW.ReadClient itself rather than answering without a client.
 ]]
-local VERSION_STRING_KEYS = { forever = true, classic_tbc = true, classic_mop = true, unknown = true }
+local VERSION_STRING_KEYS = {
+  forever = true, classic_tbc = true, classic_wrath = true, classic_cata = true,
+  classic_mop = true, unknown = true,
+}
 
 function EW.VersionKey()
   local client = EW.Client or (EW.ReadClient and EW.ReadClient())
@@ -169,16 +180,18 @@ everything else: Classic Era's patches run 1.14 and 1.15, and Forever's run
 1.60 and up, so the client key is read off the version string's major and
 minor first, before WOW_PROJECT_ID is even asked, whatever project id the
 client turns out to carry. After Forever and Retail, the version string's
-major also names the other two classic clients the site holds, from 0.2.4:
-2 is Burning Crusade Classic Anniversary (classic_tbc), 5 is Mists of
-Pandaria Classic (classic_mop), and 1 below Forever's minimum is Classic Era
-or Hardcore. Any other readable major off the mainline project id has no
-row on the site and reads as unknown. A version string this will not
-parse, and a project id this table then has no row for either, is treated
-as the most restrictive client there is: a client the table does not
-recognize gets its own unknown row, off in exactly the same shape as
-Forever's, not the most permissive one, because a permissive guess is
-exactly the mistake the alert punished.
+major also names the other classic clients the site holds: 2 is Burning
+Crusade Classic Anniversary (classic_tbc) and 5 is Mists of Pandaria
+Classic (classic_mop), from 0.2.4; 3 is Wrath of the Lich King Classic
+(classic_wrath) and 4 is Cataclysm Classic (classic_cata), from 0.2.5; and
+1 below Forever's minimum is Classic Era or Hardcore. Any other readable
+major off the mainline project id, 6 and above, has no row on the site and
+reads as unknown. A version string this will not parse, and a project id
+this table then has no row for either, is treated as the most restrictive
+client there is: a client the table does not recognize gets its own
+unknown row, off in exactly the same shape as Forever's, not the most
+permissive one, because a permissive guess is exactly the mistake the alert
+punished.
 
 EW.Client and EW.Caps are built here, at load, rather than waiting for
 ADDON_LOADED. The tooltip hook in Objects.lua and the combat log
@@ -234,6 +247,14 @@ local CAPABILITY_TABLE = {
   -- Retail, so the row holds whichever auction window the client carries.
   classic_tbc = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
   classic_mop = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
+  -- Wrath of the Lich King Classic and Cataclysm Classic, from 0.2.5: the
+  -- same row again, for the same reasons. worldCursor stays off as on every
+  -- classic row, both clients keep the combat log and the classic GUID
+  -- reader, and auction is on because Auction.lua's own scan steps aside
+  -- wherever C_AuctionHouse exists, so the row holds whichever auction
+  -- window the client carries.
+  classic_wrath = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
+  classic_cata  = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
   -- Forever: settled by the owner's own probe and capability tests above.
   forever     = { worldCursor = true,  unitGuid = true,  combatLog = false, auction = false },
   -- A client this table cannot place: the same row 0.2.1 gave Forever before
@@ -282,6 +303,15 @@ function EW.ReadClient()
     -- mainline one, and before 0.2.4 this session fell through to the
     -- Classic Era branch below and was keyed classic_era.
     key = "classic_tbc"
+  elseif major == 3 and minor ~= nil then
+    -- Wrath of the Lich King Classic, 3.x, such as Titan Reforged's 3.80.2.
+    -- The site gained a classic_wrath row on 28 September 2026, and before
+    -- 0.2.5 this session read as unknown and its upload was refused.
+    key = "classic_wrath"
+  elseif major == 4 and minor ~= nil then
+    -- Cataclysm Classic, 4.4.x, read as unknown before 0.2.5 for the same
+    -- reason; the site's classic_cata row was added the same day.
+    key = "classic_cata"
   elseif major == 5 and minor ~= nil then
     -- Mists of Pandaria Classic, 5.5.x, keyed classic_era before 0.2.4 for
     -- the same reason.
@@ -299,8 +329,7 @@ function EW.ReadClient()
     key = hardcore and "hardcore" or "classic_era"
   else
     -- An unreadable version string, or a readable one of a major the site
-    -- holds no versions row for, such as 3 or 4 (Wrath of the Lich King or
-    -- Cataclysm Classic) or 6 and above off the mainline project id.
+    -- holds no versions row for, 6 and above off the mainline project id.
     key = "unknown"
   end
 
@@ -557,8 +586,9 @@ function EW.Database()
   -- it. The site's versions table has had its forever row enabled since 24
   -- September 2026, so from 0.2.3 db.version sends forever for a Forever
   -- session, from 0.2.4 it sends classic_tbc or classic_mop for those two
-  -- clients, and db.client rides beside it as the client this addon
-  -- detected. readCompanionFile in the site's read.ts reads specific keys
+  -- clients, from 0.2.5 classic_wrath or classic_cata for those two, and
+  -- db.client rides beside it as the client this addon detected.
+  -- readCompanionFile in the site's read.ts reads specific keys
   -- off this table and ignores the rest, so an extra one here is carried,
   -- not refused.
   db.client = EW.Client and EW.Client.key or nil
@@ -954,10 +984,11 @@ local function Status()
   -- "game" reads EW.Client.key, the client this addon detected. From 0.2.3
   -- db.version, the upload's own field, sends forever for a Forever session
   -- too, the site's versions table having had its forever row enabled since
-  -- 24 September 2026, and from 0.2.4 it sends classic_tbc or classic_mop
-  -- for those two clients, and db.client rides beside it; this line keeps
-  -- reading the client key so it says what client this addon actually found,
-  -- which prints each of the five keys the site holds through the same line.
+  -- 24 September 2026, from 0.2.4 it sends classic_tbc or classic_mop for
+  -- those two clients, and from 0.2.5 classic_wrath or classic_cata, and
+  -- db.client rides beside it; this line keeps reading the client key so it
+  -- says what client this addon actually found, which prints each of the
+  -- seven keys the site holds through the same line.
   EW.Print(string.format("version %s, game %s, patch %s.",
     EW.ADDON_VERSION, tostring(EW.Client and EW.Client.key or db.version), tostring(db.patch)))
   EW.Print(string.format("client %s (interface %s, build %s).",

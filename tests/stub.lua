@@ -131,6 +131,12 @@ function stub.Install(env)
   -- itself ever asks of a project id.
   env.WOW_PROJECT_BURNING_CRUSADE_CLASSIC = 5
   env.WOW_PROJECT_MISTS_CLASSIC = 19
+  -- From 0.2.5, the project ids Wrath of the Lich King Classic and
+  -- Cataclysm Classic report, for the same reason. The tests load the first
+  -- with Titan Reforged's version string, 3.80.2, the one 3.x client still
+  -- running, and the second with 4.4.2.
+  env.WOW_PROJECT_WRATH_CLASSIC = 11
+  env.WOW_PROJECT_CATACLYSM_CLASSIC = 14
   env.GOLD_AMOUNT = "%d Gold"
   env.SILVER_AMOUNT = "%d Silver"
   env.COPPER_AMOUNT = "%d Copper"
