@@ -1,10 +1,17 @@
-# Everything WoW Companion 0.2.5
+# Everything WoW Companion 0.2.6
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.2.5. It is free and open source under the MIT license.
+This is version 0.2.6. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.2.6** records each class's talent trees for the site's talent calculators. On 20 October 2026 the owner decided the Classic three tree calculator's data is recorded by the Companion from the game client's own talent functions: Forever first, on its launch day, 4 November 2026, with a fresh character of each of the nine classes, and Classic Era later. Blizzard's Classic Game Data API publishes no talent document, and a datamined table or another site's database is not a source the site uses, so the client is the only source.
+
+- **`/ewow talents`.** Reads the current character's class trees and keeps them: the class file token, the site's class slug and the class id, the client key, `WOW_PROJECT_ID`, the build, build number and interface number from `GetBuildInfo`, the character's level, a timestamp and the addon version, then every tree (id where the client gives one, index, name, icon, background) and every talent (id where the client gives one, name, icon, tier, column, maximum rank, the milestone mark, and each prerequisite by tier and column with the prerequisite's id and index where it resolves). It prints, for example, "Recorded 3 trees, 51 talents for Warrior. /reload or log out to save." and the classes held so far for the client. Nothing about the character beyond its class and level is written: no name, no realm, and no rank the character has spent.
+- **Both talent APIs, behind feature detection.** Forever's client carries the Retail project id, so its talents may come through the classic functions (`GetNumTalentTabs`, `GetTalentTabInfo`, `GetNumTalents`, `GetTalentInfo`, `GetTalentPrereqs`, and `GetTalentLink` for the id) or through the modern ones (`C_ClassTalents.GetActiveConfigID` and `C_Traits`' config, tree, node, entry and definition info). Both are read, every call inside `pcall`, the classic shape first. A trait node's tier and column are its rank among its tree's heights and widths, with the raw position kept beside them, and its prerequisites are the nodes whose arrows point at it. Where both answer, the second is kept beside the first under `alt`. Where neither answers, the capture is a diagnostic naming which of the functions the client has and why each path gave nothing, and a level one character is told to try again at level 10. A failed read never replaces a good capture of the same class. The command waits for the player to leave combat.
+- **Its own saved variable.** The captures live in `EverythingWoWTalentsDB`, declared beside `EverythingWoWDB` in both tables of contents and written into the same `EverythingWoW.lua`, one per class per client under a `<client>:<CLASS>` key, so a second read of a class replaces the first and nine classes give nine entries. The site's upload page reads `EverythingWoWDB` alone and sends only its version, patch, addon and observations, so the captures never reach the upload's validation, its observation count or its payload caps, and an upload of the file goes through exactly as before. The site does not read the captures yet, so on launch day the file goes to the Orchestrator. `/ewow clear` leaves the captures alone, and `/ewow talents clear` throws them away.
+- **The version, the path line and the tests.** Both tables of contents carry `## Version: 0.2.6` and keep the `## Interface` lists 0.2.5 wrote, `120100, 50504, 20506, 16001, 11509` and `11509`. `/ewow path` now prints the game folder, `_<flavor>_`, in the path. The test stand in's `GetBuildInfo` reads `unpack` where `table.unpack` is missing, so the suite runs under Lua 5.1, the game's own Lua, as well as 5.4. The tests read a three tree classic shape with an arrow, a `C_Traits` shape with an edge, a choice node and an empty node, both at once, and neither, and the Retail and Forever files they write carry `EverythingWoWTalentsDB` beside `EverythingWoWDB`, the Forever one with all nine classes, so the worker's file check proves the site's parser still accepts a file holding both.
 
 **0.2.5** keys a Wrath of the Lich King Classic or Cataclysm Classic session as the site's own rows without declaring either client to the stores. On 28 September 2026 the site's `versions` table gained two rows, `classic_wrath` and `classic_cata`, both left disabled, and the site's upload path reads every row whether or not it is enabled, so an upload keyed to either is accepted while no page of the site shows either dataset.
 
@@ -87,6 +94,20 @@ The game writes it when you log out or reload the interface, so log out first. T
 
 `/ewow path` prints the folder in game.
 
+## Recording the Talent Trees
+
+The site's Classic and Forever talent calculators are built from each class's trees as the game client itself shows them, and the Companion records them on `/ewow talents`.
+
+On launch day, log in a new character of each class, type `/ewow talents`, then `/reload`. Then send your SavedVariables file to the Orchestrator. A level one character is enough where the client shows the trees from level one; if the addon says no trees could be read and suggests level 10, read that class again once it reaches level 10.
+
+The file is the same one you upload:
+
+```
+World of Warcraft/_<flavor>_/WTF/Account/<ACCOUNT>/SavedVariables/EverythingWoW.lua
+```
+
+where `_<flavor>_` is the game's own folder, such as `_retail_` or `_classic_era_` (Forever's is whichever folder its launcher installs into). The trees are kept in their own part of that file, `EverythingWoWTalentsDB`, which the upload page does not read yet, so uploading the file on the site as usual still works and sends only the observations. Each class is held once per game version and a second read of the same class replaces the first, so nine runs give nine entries. `/ewow clear` leaves them alone and `/ewow talents clear` throws them away. Only the class and the level of the character are recorded beside the trees: no name, no realm, and no talent you have spent.
+
 ## Source and Releases
 
 The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A release is a tag on that repository, `v` followed by the version both tables of contents carry, and each tag is packaged into the `EverythingWoW` folder the stores offer: on CurseForge at <https://www.curseforge.com/wow/addons/everything-wow-companion> and on Wago at <https://addons.wago.io/addons/everything-wow-companion>. Both tables of contents carry `X-Curse-Project-ID` and `X-Wago-ID`.
@@ -102,6 +123,7 @@ The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A r
 | Vendors | When a merchant window opens: the vendor npc and up to 100 of its items, each with its price in copper, its stack size, and, where it is bought with something other than money, the currency id and how much of it the item costs. |
 | Loot and kills | When a loot window opens: the source and the items, gold included. A kill your group made that nothing dropped from is recorded as an empty loot event, because a drop rate needs the kills that dropped nothing as much as the ones that did. |
 | Your character | Once on login, after the client has loaded your gear and currencies, and on `/ewow snapshot`: your gear per slot, talents, professions, reputations, and currencies. After that, only when an hour has passed and your gear or your level has changed. |
+| Your class's talent trees | Only on `/ewow talents`: every tree and talent of your class, with each talent's place, maximum rank and prerequisite, kept apart from the observations. |
 | Auction rows | On a client without Blizzard's own `C_AuctionHouse` API, such as Classic Era and Hardcore, from a search you ran yourself: item, quantity, and unit price. The addon never runs a scan of its own and never sends a query to Blizzard. Retail, and any other client that has that API, is skipped entirely, because Blizzard's own auction API is what the site reads there. Refused outright on Forever as of the owner's own probe, so the `auction` capability is off there and this recorder stays idle. |
 
 ## What is never recorded
@@ -125,6 +147,7 @@ The map id and the coordinates are the client's own: `C_Map.GetBestMapForUnit("p
 | `/ewow snapshot` | Records your character snapshot now rather than waiting for the next login. |
 | `/ewow path` | Prints where the file is written. |
 | `/ewow probe` | Attempts every event this addon registers, one at a time, and prints whether the client allowed or refused each one. Saved to the file under `db.probe` as well. |
+| `/ewow talents` | Records your class's talent trees as the client shows them, and prints how many trees and talents it read. See Recording the Talent Trees. `/ewow talents clear` throws every recorded tree away. |
 | `/ewow cap <name> on\|off` | Flips one capability, `worldCursor`, `unitGuid`, `combatLog`, or `auction`, on or off for the rest of the session, so a capability the probe found safe can be tested on its own. Does not persist past a reload. |
 
 ## Limits of this version
@@ -140,9 +163,13 @@ The addon is honest about what it cannot see, because a guessed id would become 
 
 The recorders are plain Lua with no libraries. `tests/run.lua` loads the real addon files against a small stand in for the client, fires the events, asserts the saved shape, and writes a file the way the game writes one. The Everything WoW worker's `addon/tests/check-file.mjs`, which stays with the site's code because it reads the site's parser out of the application repository, then reads that file with the site's own parser and with the worker's aggregation readers, so the file is proved against both ends rather than against a description of them. Since 0.2.0, `tests/run.lua` also loads the addon fresh against simulated clients, Retail, Classic Era, Forever, and one the capability table does not recognize, joined in 0.2.4 by Burning Crusade Classic 2.5.6 and Mists Classic 5.5.4 and in 0.2.5 by Wrath of the Lich King Classic 3.80.2, Cataclysm Classic 4.4.2, and a 6.x session the site holds no row for, and asserts the client key, the saved version key, and each restricted capability for its client; since 0.2.2, Forever's own profile has `worldCursor` and `unitGuid` on, so firing one of those gated events there is asserted to write an observation rather than nothing, while `combatLog` and `auction` stay off and their events are asserted to write nothing and raise no error. Since 0.2.1, `stub.state.forbiddenEvents` makes the stand in client refuse one named event's registration the way the owner's own Forever session refused `RegisterEvent()`, which the tests use to prove that a Forever session carrying the mainline project id still reads as `forever`, that the refusal is attributed to the exact event rather than to every capability, and that `/ewow probe` prints and saves one line per event. Since 0.2.2, `stub.state.forbiddenUnregisterEvents` and `stub.state.unregisterAttempts` reproduce the owner's own second alert, naming `EverythingWoWFrame:UnregisterEvent()`, and the tests use them to prove a refused registration is never followed by an unregister call at all and that a refused unregister is still attributed to its own event rather than falling back to every capability off.
 
+Since 0.2.6, `stub.InstallClassicTalents` and `stub.InstallTraits` give the stand in client either talent API for one test at a time, and `stub.RemoveTalentApis` takes them away again, so every other test still reads a client with neither.
+
 ```
 lua5.4 tests/run.lua /tmp/EverythingWoW.lua
 ```
+
+`lua5.1` runs the same suite.
 
 The run writes five more files beside the first, from a Forever, a Burning Crusade Classic, a Mists Classic, a Wrath of the Lich King Classic, and a Cataclysm Classic session, `/tmp/EverythingWoW-forever.lua`, `/tmp/EverythingWoW-tbc.lua`, `/tmp/EverythingWoW-mists.lua`, `/tmp/EverythingWoW-wrath.lua`, and `/tmp/EverythingWoW-cata.lua`, and the worker's `node addon/tests/check-file.mjs <file>` reads any one of them.
 

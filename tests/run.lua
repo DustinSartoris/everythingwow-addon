@@ -5,6 +5,8 @@ Run them with a Lua interpreter from the repository root:
 
     lua5.4 tests/run.lua [output file]
 
+or lua5.1, the game's own Lua, the same way.
+
 They load the real addon files against the stub client in stub.lua, fire the
 events the recorders listen for, and assert the shape of EverythingWoWDB: the
 contract's field names, the payload spellings, the caps, the ring buffer, the
@@ -14,8 +16,11 @@ output file, which defaults to the scratchpad path below, and five more
 beside it, from a Forever, a Burning Crusade Classic, a Mists Classic, a
 Wrath of the Lich King Classic, and a Cataclysm Classic session, named for
 the first with -forever, -tbc, -mists, -wrath, and -cata before its
-extension. The worker's addon/tests/check-file.mjs then reads any written
-file with the site's own parser.
+extension. From 0.2.6 the first two also carry EverythingWoWTalentsDB,
+the talent captures, beside EverythingWoWDB, the way the client writes the
+addon's two saved variables into one file. The worker's
+addon/tests/check-file.mjs then reads any written file with the site's own
+parser.
 ]]
 
 local root = (arg and arg[0] or "tests/run.lua"):gsub("tests/run%.lua$", "")
@@ -39,7 +44,7 @@ end
 
 stub.Install(_G)
 
-local FILES = { "Core", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Auction" }
+local FILES = { "Core", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Talents", "Auction" }
 
 --[[ Loads every addon file fresh into a new table, the way the game loads
      them once at login: EW.Client and EW.Caps are computed as Core.lua
@@ -53,6 +58,7 @@ local function LoadFreshAddon(project, build)
   stub.state.project = project
   stub.ResetFrames()
   _G.EverythingWoWDB = nil
+  _G.EverythingWoWTalentsDB = nil
   local fresh = {}
   for _, name in ipairs(FILES) do
     local chunk = assert(loadfile(root .. name .. ".lua"))
@@ -88,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.5")
+equal("addon is the addon version", saved.addon, "0.2.6")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -736,8 +742,8 @@ do
   local text = table.concat(stub.state.printed, "\n")
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
-  check("status prints the 0.2.5 addon version",
-    text:find("version 0.2.5", 1, true) ~= nil, text)
+  check("status prints the 0.2.6 addon version",
+    text:find("version 0.2.6", 1, true) ~= nil, text)
 end
 
 --[[
@@ -946,6 +952,329 @@ do
     table.concat(stub.state.printed, "\n"):find("Usage", 1, true) ~= nil)
 end
 
+--[[
+0.2.6: `/ewow talents`, the talent tree recorder in Talents.lua. Each shape
+is installed on the stand in client only for its own test and removed after,
+so nothing above or below this block reads a client with talent functions.
+The classic shape is three trees with an arrow between two talents in the
+first, read on the owner's own Forever session; the C_Traits shape is two
+trees of positioned nodes with an edge, a choice node and an empty node; and
+the last shape has neither, which must still write a diagnostic.
+]]
+local function HoldsString(value, needle)
+  if type(value) == "string" then return value:find(needle, 1, true) ~= nil end
+  if type(value) ~= "table" then return false end
+  for key, item in pairs(value) do
+    if HoldsString(key, needle) or HoldsString(item, needle) then return true end
+  end
+  return false
+end
+
+local function CountKeys(value)
+  local count = 0
+  for _ in pairs(value or {}) do count = count + 1 end
+  return count
+end
+
+local CLASSIC_TABS = {
+  {
+    id = 161, name = "Arms", icon = 132355, background = "WarriorArms",
+    talents = {
+      { id = 9001, name = "Arms One", icon = 132282, tier = 1, column = 1, maxRank = 3 },
+      -- Listed before its prerequisite, which is how the client's own
+      -- talent indexes can fall, so the arrow is resolved by tier and
+      -- column rather than by order.
+      { id = 9003, name = "Arms Three", icon = 132284, tier = 3, column = 2, maxRank = 3, prereq = { 1, 2 } },
+      { id = 9002, name = "Arms Two", icon = 132283, tier = 1, column = 2, maxRank = 5, rank = 2 },
+      { id = 9004, name = "Arms Four", icon = 132285, tier = 2, column = 3, maxRank = 2 },
+      { id = 9005, name = "Arms Five", icon = 132286, tier = 5, column = 2, maxRank = 1, exceptional = true },
+    },
+  },
+  {
+    id = 164, name = "Fury", icon = 132347, background = "WarriorFury",
+    talents = {
+      { id = 9101, name = "Fury One", icon = 132290, tier = 1, column = 2, maxRank = 5 },
+      { id = 9102, name = "Fury Two", icon = 132291, tier = 1, column = 3, maxRank = 5 },
+      { id = 9103, name = "Fury Three", icon = 132292, tier = 2, column = 1, maxRank = 2 },
+    },
+  },
+  {
+    id = 163, name = "Protection", icon = 134952, background = "WarriorProtection",
+    talents = {
+      { id = 9201, name = "Protection One", icon = 132300, tier = 1, column = 2, maxRank = 5 },
+      { id = 9202, name = "Protection Two", icon = 132301, tier = 1, column = 3, maxRank = 5 },
+    },
+  },
+}
+
+-- The classic shape, read on a Forever session on the mainline project id.
+do
+  _G.GameTooltip.OnShow = nil
+  local talentGate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 1, isPlayer = true }
+  stub.state.class = { "Warrior", "WARRIOR", 1 }
+  stub.InstallClassicTalents(_G, CLASSIC_TABS)
+  talentGate.SlashCommand("clear")
+  talentGate.TakeSnapshot(true)
+  local observationsBefore = #talentGate.Database().observations
+  stub.state.printed = {}
+  talentGate.SlashCommand("talents")
+  local printed = table.concat(stub.state.printed, "\n")
+  check("talents prints the confirmation line",
+    printed:find("Recorded 3 trees, 10 talents for Warrior. /reload or log out to save.", 1, true) ~= nil, printed)
+  check("talents prints the classes held for the client",
+    printed:find("Classes held for forever (1): warrior.", 1, true) ~= nil, printed)
+
+  local talentDb = _G.EverythingWoWTalentsDB
+  check("the captures live in their own saved variable", type(talentDb) == "table")
+  equal("the talent saved variable names its format", talentDb.format, "everythingwow/companion-talents/1")
+  local capture = talentDb.captures["forever:WARRIOR"]
+  check("a capture is keyed by client and class", type(capture) == "table")
+  equal("the capture holds the class file token", capture.class, "WARRIOR")
+  equal("the capture holds the site's class slug", capture.class_slug, "warrior")
+  equal("the capture holds the class id", capture.class_id, 1)
+  equal("the capture holds the client key", capture.client, "forever")
+  equal("the capture holds the project id", capture.project, 1)
+  equal("the capture holds the build", capture.build, "1.60.1")
+  equal("the capture holds the build number", capture.build_number, "70000")
+  equal("the capture holds the interface number", capture.interface, 16001)
+  equal("the capture holds the character's level", capture.level, 1)
+  equal("the capture holds a timestamp", capture.t, stub.state.time)
+  equal("the capture holds the addon version", capture.addon, "0.2.6")
+  equal("the capture names the classic path", capture.source, "classic")
+  equal("the classic path reports ok", capture.paths.classic, "ok")
+  equal("the traits path reports absent on this client", capture.paths.traits, "absent")
+  equal("the api diagnostic names a classic function present", capture.api.GetTalentInfo, "function")
+  equal("the api diagnostic leaves out a function absent", capture.api.C_Traits, nil)
+  equal("no second path is kept where only one answered", capture.alt, nil)
+  equal("three trees are recorded", #capture.trees, 3)
+  equal("ten talents are counted", capture.talents, 10)
+
+  local arms = capture.trees[1]
+  equal("a tree carries its id in the id first shape", arms.id, 161)
+  equal("a tree carries its index", arms.index, 1)
+  equal("a tree carries its name", arms.name, "Arms")
+  equal("a tree carries its icon", arms.icon, 132355)
+  equal("a tree carries its background", arms.background, "WarriorArms")
+  equal("the first tree holds five talents", #arms.talents, 5)
+  equal("the third tree holds two talents", #capture.trees[3].talents, 2)
+  local first, third = arms.talents[1], arms.talents[2]
+  equal("a talent carries its index", first.index, 1)
+  equal("a talent carries its id from the talent link", first.id, 9001)
+  equal("a talent carries its name", first.name, "Arms One")
+  equal("a talent carries its icon", first.icon, 132282)
+  equal("a talent carries its tier", first.tier, 1)
+  equal("a talent carries its column", first.column, 1)
+  equal("a talent carries its maximum rank", first.max_rank, 3)
+  equal("a talent with no arrow requires nothing", #first.requires, 0)
+  equal("a talent with an arrow requires one talent", #third.requires, 1)
+  equal("the prerequisite carries its tier", third.requires[1].tier, 1)
+  equal("the prerequisite carries its column", third.requires[1].column, 2)
+  equal("the prerequisite resolves to the talent's id", third.requires[1].id, 9002)
+  equal("the prerequisite resolves to the talent's index", third.requires[1].index, 3)
+  equal("a milestone talent is marked exceptional", arms.talents[5].exceptional, true)
+  equal("a talent that is not a milestone carries no mark", first.exceptional, nil)
+  equal("the character's spent rank is never recorded", arms.talents[3].rank, nil)
+  check("the character's name is never in the capture", not HoldsString(talentDb, "Thalos"))
+  check("the realm is never in the capture", not HoldsString(talentDb, "Tichondrius"))
+  equal("the talents never become observations",
+    #talentGate.Database().observations, observationsBefore)
+  equal("the observation file carries no talent key", talentGate.Database().talents, nil)
+
+  -- A second read of the same class replaces the first; another class adds one.
+  stub.state.time = stub.state.time + 60
+  talentGate.SlashCommand("talents")
+  equal("a second read of a class keeps one capture", CountKeys(talentDb.captures), 1)
+  equal("a second read replaces the first", talentDb.captures["forever:WARRIOR"].t, stub.state.time)
+  stub.state.class = { "Druid", "DRUID", 11 }
+  talentGate.SlashCommand("talents")
+  equal("a second class adds a second capture", CountKeys(talentDb.captures), 2)
+  equal("the druid capture has the druid slug", talentDb.captures["forever:DRUID"].class_slug, "druid")
+  stub.state.class = { "Death Knight", "DEATHKNIGHT", 6 }
+  talentGate.SlashCommand("talents")
+  equal("a two word class takes the site's hyphenated slug",
+    talentDb.captures["forever:DEATHKNIGHT"].class_slug, "death-knight")
+
+  -- /ewow clear empties the observations and leaves the captures alone.
+  talentGate.SlashCommand("clear")
+  equal("clear leaves the talent captures", CountKeys(_G.EverythingWoWTalentsDB.captures), 3)
+
+  -- In combat nothing is read or written.
+  stub.state.combat = true
+  stub.state.printed = {}
+  stub.state.class = { "Mage", "MAGE", 8 }
+  talentGate.SlashCommand("talents")
+  equal("talents in combat records nothing", talentDb.captures["forever:MAGE"], nil)
+  check("talents in combat says to leave combat",
+    table.concat(stub.state.printed, "\n"):find("Leave combat", 1, true) ~= nil)
+  stub.state.combat = false
+
+  -- A GetTalentInfo answering an id first is a different function under the
+  -- same name, and is not read as a classic talent.
+  stub.InstallClassicTalents(_G, { { name = "Rows", talents = { { name = "Row Talent", numericFirst = true } } } })
+  local rowCapture = talentGate.ReadTalentTrees()
+  equal("an id first GetTalentInfo is not read as classic", rowCapture.paths.classic, "no_talents")
+  -- /ewow talents clear throws the captures away, and only those.
+  talentGate.Record("npc", "npc", 12, 84, 0.2, 0.2, nil)
+  talentGate.SlashCommand("talents clear")
+  equal("talents clear empties the captures", CountKeys(_G.EverythingWoWTalentsDB.captures), 0)
+  equal("talents clear leaves the observations", #talentGate.Database().observations, 1)
+  stub.RemoveTalentApis(_G)
+  stub.state.class = { "Shaman", "SHAMAN", 7 }
+end
+
+-- The name first shape of GetTalentTabInfo, on a Classic Era session, keyed
+-- under classic_era rather than beside Forever's capture of the same class.
+do
+  _G.GameTooltip.OnShow = nil
+  local eraGate = LoadFreshAddon(2, { "1.15.9", "50000", "Sep 17 2026", 11509 })
+  stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 60, isPlayer = true }
+  stub.state.class = { "Warrior", "WARRIOR", 1 }
+  stub.InstallClassicTalents(_G, {
+    { name = "Arms", icon = "Interface\\Icons\\Ability_Rogue_Eviscerate", background = "WarriorArms",
+      talents = { { name = "Arms One", icon = "Interface\\Icons\\Ability_Rogue_Ambush", tier = 1, column = 1, maxRank = 3 } } },
+  })
+  eraGate.SlashCommand("talents")
+  local capture = _G.EverythingWoWTalentsDB.captures["classic_era:WARRIOR"]
+  check("a classic era read is keyed classic_era", type(capture) == "table")
+  equal("the name first shape gives the tree name", capture.trees[1].name, "Arms")
+  equal("the name first shape gives a texture path icon", capture.trees[1].icon, "Interface\\Icons\\Ability_Rogue_Eviscerate")
+  equal("the name first shape gives the background", capture.trees[1].background, "WarriorArms")
+  equal("the name first shape has no tree id", capture.trees[1].id, nil)
+  equal("a talent with no link has no id", capture.trees[1].talents[1].id, nil)
+  equal("a classic era read records the classic era build", capture.build, "1.15.9")
+  stub.RemoveTalentApis(_G)
+  stub.state.class = { "Shaman", "SHAMAN", 7 }
+end
+
+local TRAITS_SPEC = {
+  configId = 4242,
+  spells = {
+    [5001] = { name = "Spell One", icon = 136001 },
+    [5002] = { name = "Spell Two", icon = 136002 },
+    [5003] = { name = "Spell Three", icon = 136003 },
+    [5004] = { name = "Spell Four", icon = 136004 },
+    [5005] = { name = "Spell Five", icon = 136005 },
+  },
+  trees = {
+    {
+      id = 790,
+      nodes = {
+        { id = 80001, x = 1200, y = 1500, maxRanks = 2, entries = { { id = 70001, definition = 60001, spell = 5001 } }, edges = { 80003 } },
+        { id = 80002, x = 1800, y = 1500, maxRanks = 1, entries = { { id = 70002, definition = 60002, spell = 5002, overrideName = "Override Two" } } },
+        { id = 80003, x = 1200, y = 2100, maxRanks = 1,
+          entries = { { id = 70003, definition = 60003, spell = 5003 }, { id = 70004, definition = 60004, spell = 5004 } } },
+        { id = 80004, empty = true },
+      },
+    },
+    {
+      id = 791,
+      nodes = {
+        { id = 81001, x = 600, y = 900, maxRanks = 3, entries = { { id = 71001, definition = 61001, spell = 5005 } } },
+      },
+    },
+  },
+}
+
+-- The C_Traits shape, on a Retail session with no classic functions.
+do
+  _G.GameTooltip.OnShow = nil
+  local traitsGate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+  stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 80, isPlayer = true }
+  stub.state.class = { "Druid", "DRUID", 11 }
+  stub.InstallTraits(_G, TRAITS_SPEC)
+  stub.state.printed = {}
+  traitsGate.SlashCommand("talents")
+  check("the traits read prints the confirmation line",
+    table.concat(stub.state.printed, "\n"):find("Recorded 2 trees, 4 talents for Druid.", 1, true) ~= nil,
+    table.concat(stub.state.printed, "\n"))
+  local capture = _G.EverythingWoWTalentsDB.captures["retail:DRUID"]
+  equal("the capture names the traits path", capture.source, "traits")
+  equal("the classic path reports absent", capture.paths.classic, "absent")
+  equal("the traits path reports ok", capture.paths.traits, "ok")
+  equal("the trait trees are recorded", #capture.trees, 2)
+  equal("a trait tree carries its tree id", capture.trees[1].id, 790)
+  equal("a node the tree does not hold is passed over", #capture.trees[1].talents, 3)
+  local one, two, three = capture.trees[1].talents[1], capture.trees[1].talents[2], capture.trees[1].talents[3]
+  equal("a trait talent's id is its node id", one.id, 80001)
+  equal("a trait talent carries its entry", one.entry, 70001)
+  equal("a trait talent carries its definition", one.definition, 60001)
+  equal("a trait talent carries its spell", one.spell, 5001)
+  equal("a trait talent's name falls back to its spell's", one.name, "Spell One")
+  equal("a trait talent's icon falls back to its spell's", one.icon, 136001)
+  equal("an override name wins over the spell's", two.name, "Override Two")
+  equal("a trait talent carries its maximum rank", one.max_rank, 2)
+  equal("a trait talent keeps its raw x", one.pos_x, 1200)
+  equal("a trait talent keeps its raw y", one.pos_y, 1500)
+  equal("the tier is the rank among the tree's heights", three.tier, 2)
+  equal("the column is the rank among the tree's widths", two.column, 2)
+  equal("the first column is 1", one.column, 1)
+  equal("an edge makes its source a prerequisite", #three.requires, 1)
+  equal("the prerequisite carries the source node's id", three.requires[1].id, 80001)
+  equal("the prerequisite carries the source node's tier", three.requires[1].tier, 1)
+  equal("the prerequisite carries the source node's column", three.requires[1].column, 1)
+  equal("a node no edge names requires nothing", #two.requires, 0)
+  equal("a choice node keeps each entry", #three.choices, 2)
+  equal("a choice entry carries its own name", three.choices[2].name, "Spell Four")
+  equal("a single entry node keeps no choices", one.choices, nil)
+
+  -- Where both shapes answer, the classic one leads and the traits one is kept.
+  stub.InstallClassicTalents(_G, CLASSIC_TABS)
+  stub.state.class = { "Warrior", "WARRIOR", 1 }
+  traitsGate.SlashCommand("talents")
+  local both = _G.EverythingWoWTalentsDB.captures["retail:WARRIOR"]
+  equal("where both answer the classic path leads", both.source, "classic")
+  equal("where both answer the traits path is kept beside it", both.alt.source, "traits")
+  equal("the kept traits read holds its trees", #both.alt.trees, 2)
+  equal("the kept traits read counts its talents", both.alt.talents, 4)
+  stub.RemoveTalentApis(_G)
+  stub.state.class = { "Shaman", "SHAMAN", 7 }
+end
+
+-- Neither shape: a diagnostic rather than silence, and never over a good capture.
+do
+  _G.GameTooltip.OnShow = nil
+  local noneGate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 1, isPlayer = true }
+  stub.state.class = { "Rogue", "ROGUE", 4 }
+  stub.RemoveTalentApis(_G)
+  stub.state.printed = {}
+  local ok = pcall(noneGate.SlashCommand, "talents")
+  check("talents on a client with neither api never throws", ok)
+  local printed = table.concat(stub.state.printed, "\n")
+  check("talents on a client with neither api says so",
+    printed:find("No talent trees could be read for Rogue (classic absent, traits absent).", 1, true) ~= nil, printed)
+  check("a level one read is told to try at level 10", printed:find("level 10", 1, true) ~= nil, printed)
+  local talentDb = _G.EverythingWoWTalentsDB
+  local diagnostic = talentDb.captures["forever:ROGUE"]
+  check("the diagnostic is kept under the class's key", type(diagnostic) == "table")
+  equal("the diagnostic holds no trees", #diagnostic.trees, 0)
+  equal("the diagnostic counts no talents", diagnostic.talents, 0)
+  equal("the diagnostic names no source", diagnostic.source, nil)
+  equal("the diagnostic reports the classic path absent", diagnostic.paths.classic, "absent")
+  equal("the diagnostic reports the traits path absent", diagnostic.paths.traits, "absent")
+  check("the diagnostic carries the api presence table", type(diagnostic.api) == "table")
+  equal("the diagnostic leaves out a function the client lacks", diagnostic.api.GetTalentInfo, nil)
+  equal("the diagnostic is kept as the last diagnostic", talentDb.lastDiagnostic, diagnostic)
+
+  -- A tree read first, then a failed read of the same class, keeps the tree.
+  stub.InstallClassicTalents(_G, CLASSIC_TABS)
+  noneGate.SlashCommand("talents")
+  equal("a good read replaces a diagnostic", talentDb.captures["forever:ROGUE"].talents, 10)
+  stub.RemoveTalentApis(_G)
+  noneGate.SlashCommand("talents")
+  equal("a failed read never replaces a good capture", talentDb.captures["forever:ROGUE"].talents, 10)
+  equal("the failed read is still kept as the last diagnostic", talentDb.lastDiagnostic.talents, 0)
+
+  -- Traits present but answering no config, which is what a character
+  -- before its talents open can look like on a modern client.
+  stub.InstallTraits(_G, { configId = nil, trees = {} })
+  local early = noneGate.ReadTalentTrees()
+  equal("traits with no active config report no_config", early.paths.traits, "no_config")
+  stub.RemoveTalentApis(_G)
+  stub.state.class = { "Shaman", "SHAMAN", 7 }
+end
+
 -- The rest of this file continues against a fresh, unrelated retail
 -- instance, so the scenarios above cannot leak into the SavedVariables file
 -- this script writes at the end.
@@ -1020,9 +1349,18 @@ stub.Fire("LOOT_OPENED")
 EW.RecordObjectFromGuid("GameObject-0-3888-0-11-1731-000136DF97", true)
 EW.TakeSnapshot(true)
 EW.OnAuctionListUpdate()
+-- From 0.2.6 the file carries the talent captures as a second global beside
+-- EverythingWoWDB, the way the client writes an addon's two saved
+-- variables, so check-file.mjs proves the site's parser still accepts it.
+stub.state.class = { "Druid", "DRUID", 11 }
+stub.InstallTraits(_G, TRAITS_SPEC)
+EW.SlashCommand("talents")
+stub.RemoveTalentApis(_G)
+stub.state.class = { "Shaman", "SHAMAN", 7 }
 
 local file = assert(io.open(outputPath, "w"))
 file:write("\nEverythingWoWDB = " .. Serialize(db(), 0) .. "\n")
+file:write("EverythingWoWTalentsDB = " .. Serialize(_G.EverythingWoWTalentsDB, 0) .. "\n")
 file:close()
 
 check("the written file holds every kind the run recorded", #observations() >= 7, #observations())
@@ -1052,13 +1390,29 @@ stub.state.loot = { { id = 2589, quantity = 2, source = "Creature-0-3888-0-11-29
 stub.Fire("LOOT_OPENED")
 foreverFile.RecordObjectFromGuid("GameObject-0-3888-0-11-1731-000136DF98", true)
 foreverFile.TakeSnapshot(true)
+-- The launch day read: three classic trees for each of nine classes, so the
+-- Forever file carries the size the owner's own file will.
+stub.InstallClassicTalents(_G, CLASSIC_TABS)
+for _, class in ipairs({
+  { "Warrior", "WARRIOR", 1 }, { "Paladin", "PALADIN", 2 }, { "Hunter", "HUNTER", 3 },
+  { "Rogue", "ROGUE", 4 }, { "Priest", "PRIEST", 5 }, { "Shaman", "SHAMAN", 7 },
+  { "Mage", "MAGE", 8 }, { "Warlock", "WARLOCK", 9 }, { "Druid", "DRUID", 11 },
+}) do
+  stub.state.class = class
+  foreverFile.SlashCommand("talents")
+end
+stub.RemoveTalentApis(_G)
+stub.state.class = { "Shaman", "SHAMAN", 7 }
+local foreverTalents = _G.EverythingWoWTalentsDB
+equal("nine classes give nine forever captures", CountKeys(foreverTalents.captures), 9)
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.5 addon version", foreverDb.addon, "0.2.5")
+equal("the forever file carries the 0.2.6 addon version", foreverDb.addon, "0.2.6")
 check("the forever file holds what that client records", #foreverDb.observations >= 5, #foreverDb.observations)
 local foreverHandle = assert(io.open(foreverOutputPath, "w"))
 foreverHandle:write("\nEverythingWoWDB = " .. Serialize(foreverDb, 0) .. "\n")
+foreverHandle:write("EverythingWoWTalentsDB = " .. Serialize(foreverTalents, 0) .. "\n")
 foreverHandle:close()
 
 --[[
@@ -1096,7 +1450,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.5 addon version", saved.addon, "0.2.5")
+  equal("the " .. suffix .. " file carries the 0.2.6 addon version", saved.addon, "0.2.6")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)

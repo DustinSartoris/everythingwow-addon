@@ -28,6 +28,10 @@ local function reset()
     printed = {},
     combatLog = nil,
     realm = "Tichondrius",
+    -- The localized class name, the class file token, and the class id
+    -- UnitClass returns for the player.
+    class = { "Shaman", "SHAMAN", 7 },
+    combat = false,
     hardcore = false,
     -- A set of event names this client refuses to register at all: RegisterEvent
     -- for one of these fires ADDON_ACTION_FORBIDDEN naming the RegisterEvent
@@ -142,7 +146,9 @@ function stub.Install(env)
   env.COPPER_AMOUNT = "%d Copper"
 
   env.time = function() return stub.state.time end
-  env.GetBuildInfo = function() return table.unpack(stub.state.build) end
+  -- unpack is a global in Lua 5.1, the game's own Lua, and moved under
+  -- table in 5.2, so either interpreter runs the suite.
+  env.GetBuildInfo = function() return (table.unpack or unpack)(stub.state.build) end
   env.GetRealmName = function() return stub.state.realm end
 
   env.C_GameRules = { IsHardcoreActive = function() return stub.state.hardcore end }
@@ -195,7 +201,10 @@ function stub.Install(env)
     return one ~= nil and two ~= nil and one.guid == two.guid
   end
   env.UnitReaction = function(_, token) return (unit(token) or {}).reaction end
-  env.UnitClass = function() return "Shaman", "SHAMAN" end
+  env.UnitClass = function()
+    local class = stub.state.class
+    return class[1], class[2], class[3]
+  end
   env.UnitRace = function() return "Orc", "Orc" end
   env.UnitFactionGroup = function() return "Horde" end
 
@@ -302,11 +311,129 @@ function stub.Install(env)
       "SomeSeller", nil, nil, row.id, true
   end
 
+  env.InCombatLockdown = function() return stub.state.combat == true end
+
   env.GameTooltip = {
     HookScript = function(self, which, handler) self[which] = handler end,
   }
 
   return env
+end
+
+--[[
+The talent functions, which no client stub carries by default, so that the
+snapshot and every other test reads a client without them, exactly as the
+suite always has. A talent test installs the shape it needs and removes it
+again when it is done.
+]]
+local TALENT_GLOBALS = {
+  "GetNumTalentTabs", "GetTalentTabInfo", "GetNumTalents", "GetTalentInfo",
+  "GetTalentPrereqs", "GetTalentLink", "C_ClassTalents", "C_Traits", "C_Spell",
+}
+
+function stub.RemoveTalentApis(env)
+  for _, name in ipairs(TALENT_GLOBALS) do env[name] = nil end
+end
+
+--[[ The classic talent functions over a list of tabs. A tab with an id
+     answers GetTalentTabInfo in the Wrath of the Lich King Classic shape,
+     id first; one without answers in the Classic Era shape, name first. A
+     talent with a prereq answers GetTalentPrereqs with its tier and column,
+     and one with an id answers GetTalentLink with a talent link. ]]
+function stub.InstallClassicTalents(env, tabs)
+  local function talent(tab, index) return ((tabs[tab] or {}).talents or {})[index] end
+  env.GetNumTalentTabs = function() return #tabs end
+  env.GetTalentTabInfo = function(tab)
+    local row = tabs[tab]
+    if not row then return nil end
+    if row.id then return row.id, row.name, "A description.", row.icon, 0, row.background, 0, true end
+    return row.name, row.icon, 0, row.background
+  end
+  env.GetNumTalents = function(tab) return #((tabs[tab] or {}).talents or {}) end
+  env.GetTalentInfo = function(tab, index)
+    local row = talent(tab, index)
+    if not row then return nil end
+    if row.numericFirst then
+      -- The row and column talents of later clients answer an id first.
+      return 19000 + index, row.name, row.icon, false, true, 1234
+    end
+    return row.name, row.icon, row.tier, row.column, row.rank or 0, row.maxRank, row.exceptional or false, true
+  end
+  env.GetTalentPrereqs = function(tab, index)
+    local row = talent(tab, index)
+    if not row or not row.prereq then return nil end
+    return row.prereq[1], row.prereq[2], true
+  end
+  env.GetTalentLink = function(tab, index)
+    local row = talent(tab, index)
+    if not row or not row.id then return nil end
+    return "|cff4e96f7|Htalent:" .. row.id .. ":-1|h[" .. row.name .. "]|h|r"
+  end
+end
+
+--[[ C_ClassTalents and C_Traits over one config. spec.trees lists each
+     tree's id and nodes; a node lists its position, maximum rank, entries
+     (each an id, a definition, a spell, and an optional override name) and
+     the nodes its arrows point to. A node marked empty answers with an ID
+     of 0, which is the client's answer for a node the tree does not hold.
+     spec.spells gives each spell's name and icon. ]]
+function stub.InstallTraits(env, spec)
+  local nodes, entries, definitions = {}, {}, {}
+  for _, tree in ipairs(spec.trees) do
+    for _, node in ipairs(tree.nodes) do
+      nodes[node.id] = node
+      for _, entry in ipairs(node.entries or {}) do
+        entries[entry.id] = entry
+        definitions[entry.definition] = entry
+      end
+    end
+  end
+  env.C_ClassTalents = { GetActiveConfigID = function() return spec.configId end }
+  env.C_Traits = {
+    GetConfigInfo = function(configId)
+      if configId ~= spec.configId then return nil end
+      local treeIds = {}
+      for _, tree in ipairs(spec.trees) do treeIds[#treeIds + 1] = tree.id end
+      return { ID = configId, type = 1, name = "Loadout", treeIDs = treeIds }
+    end,
+    GetTreeNodes = function(treeId)
+      for _, tree in ipairs(spec.trees) do
+        if tree.id == treeId then
+          local ids = {}
+          for _, node in ipairs(tree.nodes) do ids[#ids + 1] = node.id end
+          return ids
+        end
+      end
+      return {}
+    end,
+    GetNodeInfo = function(_, nodeId)
+      local node = nodes[nodeId]
+      if not node or node.empty then return { ID = 0, entryIDs = {}, visibleEdges = {} } end
+      local entryIds, edges = {}, {}
+      for _, entry in ipairs(node.entries or {}) do entryIds[#entryIds + 1] = entry.id end
+      for _, target in ipairs(node.edges or {}) do
+        edges[#edges + 1] = { visualStyle = 1, type = 0, targetNode = target, isActive = false }
+      end
+      return {
+        ID = node.id, posX = node.x, posY = node.y, maxRanks = node.maxRanks, currentRank = 0,
+        ranksPurchased = 0, type = #entryIds > 1 and 2 or 0, entryIDs = entryIds, visibleEdges = edges,
+      }
+    end,
+    GetEntryInfo = function(_, entryId)
+      local entry = entries[entryId]
+      if not entry then return nil end
+      return { definitionID = entry.definition, maxRanks = entry.maxRanks or 1, type = 1 }
+    end,
+    GetDefinitionInfo = function(definitionId)
+      local entry = definitions[definitionId]
+      if not entry then return nil end
+      return { spellID = entry.spell, overrideName = entry.overrideName }
+    end,
+  }
+  env.C_Spell = {
+    GetSpellName = function(spellId) return ((spec.spells or {})[spellId] or {}).name end,
+    GetSpellTexture = function(spellId) return ((spec.spells or {})[spellId] or {}).icon end,
+  }
 end
 
 return stub

@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.5"
+EW.ADDON_VERSION = "0.2.6"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -1095,14 +1095,22 @@ function EW.SlashCommand(message)
       EW.Print("The snapshot could not be taken. Try again once the character sheet has loaded.")
     end
   elseif command == "path" then
-    EW.Print("World of Warcraft\\WTF\\Account\\<ACCOUNT>\\SavedVariables\\EverythingWoW.lua")
+    EW.Print("World of Warcraft\\_<flavor>_\\WTF\\Account\\<ACCOUNT>\\SavedVariables\\EverythingWoW.lua")
     EW.Print("The file is written when you log out or reload the interface.")
   elseif command == "probe" then
     Probe()
   elseif command == "cap" then
     Cap(rest)
+  elseif command == "talents" then
+    -- Talents.lua's reader, from 0.2.6: the current class's trees, kept in
+    -- their own saved variable rather than among the observations.
+    if string.lower(rest) == "clear" then
+      if EW.ClearTalents then EW.ClearTalents() end
+    elseif EW.RecordTalents then
+      EW.RecordTalents()
+    end
   else
-    EW.Print("Commands: /ewow status, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off.")
+    EW.Print("Commands: /ewow status, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off, /ewow talents, /ewow talents clear.")
   end
 end
 
