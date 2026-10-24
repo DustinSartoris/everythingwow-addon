@@ -382,7 +382,7 @@ stub.state.auction = {}
 for index = 1, 120 do
   stub.state.auction[index] = { id = 2447, count = 5, buyout = 5000 + index }
 end
-_G.C_AuctionHouse = { Stub = true }
+_G.C_AuctionHouse = { GetBrowseResults = function() return {} end }
 equal("auction scanning does nothing where Blizzard has an auction api", EW.OnAuctionListUpdate(), false)
 _G.C_AuctionHouse = nil
 equal("auction scanning runs where there is none", EW.OnAuctionListUpdate(), true)
@@ -398,6 +398,13 @@ equal("an auction row carries the unit price in copper", auction.payload.items[1
 for _, observation in ipairs(observations()) do
   check("an auction payload is inside its cap", EW.JsonBytes(observation.payload) <= 4000)
 end
+-- From 0.2.6 the scan steps aside only where the modern reader can read the
+-- browse list, so a C_AuctionHouse table without it leaves the scan running.
+clear()
+_G.C_AuctionHouse = { GetAuctionItemSubClasses = function() return {} end }
+equal("auction scanning still runs beside a partial C_AuctionHouse", EW.OnAuctionListUpdate(), true)
+_G.C_AuctionHouse = nil
+clear()
 
 -- The ring buffer.
 clear()
@@ -607,18 +614,24 @@ do
 end
 
 -- 0.2.2: with auction off, Auction.lua registers no AUCTION_ITEM_LIST_UPDATE
--- listener at all, and instead announces once, at the next
--- PLAYER_ENTERING_WORLD, that the auction recorder is idle.
+-- listener at all, and announced once at the next PLAYER_ENTERING_WORLD
+-- that the auction recorder was idle. From 0.2.6 it says nothing: the owner
+-- asked for silence on 24 October 2026, and /ewow status names the idle
+-- recorders instead.
 do
   stub.state.printed = {}
+  stub.Fire("PLAYER_ENTERING_WORLD", true, false)
   stub.Fire("PLAYER_ENTERING_WORLD", false, true)
   local text = table.concat(stub.state.printed, "\n")
-  check("the idle auction recorder announces itself once at login",
-    text:find("Auction recording is off", 1, true) ~= nil, text)
+  check("the idle auction recorder no longer prints at login",
+    text:find("Auction recording is off", 1, true) == nil, text)
+  equal("nothing at all prints at login on forever", #stub.state.printed, 0)
   stub.state.printed = {}
-  stub.Fire("PLAYER_ENTERING_WORLD", false, true)
-  equal("it does not announce itself a second time in the same session",
-    #stub.state.printed, 0)
+  foreverGate.SlashCommand("status")
+  text = table.concat(stub.state.printed, "\n")
+  check("status still names forever's idle kill counter",
+    text:find("idle on this client: kill counter (combatLog off)", 1, true) ~= nil, text)
+  stub.state.printed = {}
 end
 
 --[[
@@ -804,7 +817,7 @@ do
   check("the probe prints a line for the refused event",
     text:find("COMBAT_LOG_EVENT_UNFILTERED: refused", 1, true) ~= nil, text)
   check("the probe reports its own tally",
-    text:find("11 allowed, 1 refused", 1, true) ~= nil, text)
+    text:find("18 allowed, 1 refused", 1, true) ~= nil, text)
 
   local probe = probeGate.Database().probe
   check("the probe result is written to the saved file", probe ~= nil)
@@ -857,8 +870,10 @@ do
     text:find("COMBAT_LOG_EVENT_UNFILTERED: refused", 1, true) ~= nil, text)
   check("the probe reports auction refused",
     text:find("AUCTION_ITEM_LIST_UPDATE: refused", 1, true) ~= nil, text)
-  check("the probe still tallies all twelve events, ten allowed and two refused",
-    text:find("10 allowed, 2 refused", 1, true) ~= nil, text)
+  -- From 0.2.6 the probe also asks about the modern auction reader's seven
+  -- events, which this stand in client allows.
+  check("the probe still tallies all nineteen events, seventeen allowed and two refused",
+    text:find("17 allowed, 2 refused", 1, true) ~= nil, text)
 
   equal("world cursor survives the probe, unlike the owner's own 0.2.1 session",
     ownerGate.Caps.worldCursor, true)
@@ -950,6 +965,290 @@ do
   equal("an unknown capability name changes nothing", capGate.Caps.worldCursor, true)
   check("an unknown capability name prints a usage line",
     table.concat(stub.state.printed, "\n"):find("Usage", 1, true) ~= nil)
+end
+
+--[[
+0.2.6: the modern auction reader in Auction.lua, for a client whose auction
+house is C_AuctionHouse and whose realms Blizzard's auction API does not
+cover. Each client is loaded with stub.InstallModernAuction in place before
+the addon loads, because the reader decides at load whether to listen for
+the auction house opening at all, and the shape is removed after, so
+nothing above or below this block reads a client with C_AuctionHouse.
+]]
+local AUCTION_SPEC = {
+  browse = {
+    { id = 2589, q = 400, min = 120 },
+    { id = 2592, q = 35, min = 410 },
+    -- A battle pet's row names the pet cage, so it is passed over.
+    { id = 82800, q = 1, min = 990000, pet = 39 },
+  },
+  commodities = {
+    [2589] = { { q = 20, unit = 120 }, { q = 5, unit = 125 }, { q = 200, unit = 131 } },
+  },
+  items = {
+    [19019] = { { q = 1, buyout = 25000000 }, { q = 1 } },
+  },
+}
+
+local function AuctionObservations(addon)
+  local found = {}
+  for _, observation in ipairs(addon.Database().observations) do
+    if observation.kind == "auction" then found[#found + 1] = observation end
+  end
+  return found
+end
+
+--[[ Whether a string appears anywhere inside a value, keys included. ]]
+local function Mentions(value, needle)
+  if type(value) == "string" then return value:find(needle, 1, true) ~= nil end
+  if type(value) ~= "table" then return false end
+  for key, item in pairs(value) do
+    if Mentions(key, needle) or Mentions(item, needle) then return true end
+  end
+  return false
+end
+
+-- Forever, on the mainline project id, with C_AuctionHouse.
+do
+  _G.GameTooltip.OnShow = nil
+  stub.InstallModernAuction(_G, AUCTION_SPEC)
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  gate.SlashCommand("clear")
+  equal("forever's modern auction capability is on", gate.Caps.auctionModern, true)
+  equal("forever's classic auction capability stays off", gate.Caps.auction, false)
+  equal("forever reads its auction house through the modern reader", gate.AuctionMode(), "modern")
+
+  stub.state.printed = {}
+  stub.Fire("PLAYER_ENTERING_WORLD", true, false)
+  equal("forever prints nothing at login with the modern reader either", #stub.state.printed, 0)
+
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("no result event is read before the auction house first opens", #AuctionObservations(gate), 0)
+
+  stub.state.combat = true
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("opening the auction house in combat registers nothing", gate.auctionModernEvents, nil)
+  stub.state.combat = false
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("opening it out of combat registers all six result events", gate.auctionModernEvents, 6)
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("a second opening registers nothing twice", gate.auctionModernEvents, 6)
+
+  -- Browse results.
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  local found = AuctionObservations(gate)
+  equal("a browse page is one observation", #found, 1)
+  local browse = found[1]
+  equal("the browse observation is the auction kind and subject", browse.subject, "auction")
+  equal("the browse observation carries no subject id", browse.id, nil)
+  equal("the browse observation carries the map", browse.map, 84)
+  equal("it names its source", browse.payload.source, "browse")
+  equal("the pet cage row is passed over", #browse.payload.items, 2)
+  equal("a browse row carries the item id from the item key", browse.payload.items[1].id, 2589)
+  equal("a browse row carries the total quantity", browse.payload.items[1].q, 400)
+  equal("a browse row carries the lowest price as its unit", browse.payload.items[1].unit, 120)
+  equal("a browse row carries no buyout, the client giving none", browse.payload.items[1].buyout, nil)
+  equal("the second browse row is read too", browse.payload.items[2].unit, 410)
+
+  table.insert(AUCTION_SPEC.browse, { id = 2594, q = 12, min = 800 })
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", {})
+  found = AuctionObservations(gate)
+  equal("rows the client appends are one more observation", #found, 2)
+  equal("only the appended row is read, not the page again", #found[2].payload.items, 1)
+  equal("the appended row is the new item", found[2].payload.items[1].id, 2594)
+  table.remove(AUCTION_SPEC.browse)
+
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("a fresh browse search is read from its first row again", #AuctionObservations(gate), 3)
+
+  -- Commodity results.
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  found = AuctionObservations(gate)
+  local commodity = found[#found]
+  equal("a commodity search names its source", commodity.payload.source, "commodity")
+  equal("every listing is read", #commodity.payload.items, 3)
+  equal("a listing carries the item id", commodity.payload.items[1].id, 2589)
+  equal("a listing carries its quantity", commodity.payload.items[1].q, 20)
+  equal("a listing carries its unit price", commodity.payload.items[1].unit, 120)
+  equal("a listing carries the whole listing's price as its buyout", commodity.payload.items[1].buyout, 2400)
+  equal("the last listing is read too", commodity.payload.items[3].unit, 131)
+  local before = #found
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("the same listings inside a minute are not read twice", #AuctionObservations(gate), before)
+  stub.state.time = stub.state.time + 61
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("the same search past a minute is a fresh reading", #AuctionObservations(gate), before + 1)
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", "not an item id")
+  equal("an event with no item id reads nothing", #AuctionObservations(gate), before + 1)
+
+  -- Item results.
+  stub.Fire("ITEM_SEARCH_RESULTS_UPDATED", { itemID = 19019, itemLevel = 60, itemSuffix = 0, battlePetSpeciesID = 0 }, 2001)
+  found = AuctionObservations(gate)
+  local item = found[#found]
+  equal("an item search names its source", item.payload.source, "item")
+  equal("every auction of the item is read", #item.payload.items, 2)
+  equal("an auction carries the item id", item.payload.items[1].id, 19019)
+  equal("an auction carries its quantity", item.payload.items[1].q, 1)
+  equal("an auction carries its buyout", item.payload.items[1].buyout, 25000000)
+  equal("an auction carries its unit price", item.payload.items[1].unit, 25000000)
+  equal("an auction with no buyout keeps its quantity", item.payload.items[2].q, 1)
+  equal("an auction with no buyout carries no price", item.payload.items[2].unit, nil)
+
+  -- No player data, and never a query of the addon's own.
+  local db = gate.Database()
+  check("no seller name reaches the file", not Mentions(db.observations, "SomeSeller"))
+  check("no bidder reaches the file", not Mentions(db.observations, "Player-"))
+  check("no owners field reaches the file", not Mentions(db.observations, "owners"))
+  for _, name in ipairs({ "SendBrowseQuery", "SendSearchQuery", "SendSellSearchQuery" }) do
+    equal("the reader never calls " .. name, stub.state.auctionCalls[name], nil)
+  end
+  equal("no handler raised an error", gate.lastError, nil)
+
+  -- The caps: 1,200 listings of one commodity, read 500 at a time in
+  -- observations of 50 rows, each inside the four thousand byte cap.
+  gate.SlashCommand("clear")
+  local many = {}
+  for index = 1, 1200 do many[index] = { q = 1 + (index % 20), unit = 1000000 + index } end
+  AUCTION_SPEC.commodities[2590] = many
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2590)
+  found = AuctionObservations(gate)
+  local rows, widest, largest = 0, 0, 0
+  for _, observation in ipairs(found) do
+    rows = rows + #observation.payload.items
+    if #observation.payload.items > widest then widest = #observation.payload.items end
+    local bytes = gate.JsonBytes(observation.payload)
+    if bytes > largest then largest = bytes end
+  end
+  equal("one announcement reads at most five hundred rows", rows, 500)
+  equal("five hundred rows are ten observations", #found, 10)
+  equal("no observation holds more than fifty rows", widest, 50)
+  check("every observation is inside the four thousand byte cap", largest <= 4000, largest)
+  equal("the first row is the first listing", found[1].payload.items[1].unit, 1000001)
+  stub.Fire("COMMODITY_SEARCH_RESULTS_ADDED", 2590)
+  found = AuctionObservations(gate)
+  equal("the next announcement reads the next five hundred", #found, 20)
+  equal("starting at the five hundred and first listing", found[11].payload.items[1].unit, 1000501)
+  AUCTION_SPEC.commodities[2590] = nil
+
+  -- Nothing runs in combat.
+  gate.SlashCommand("clear")
+  stub.state.time = stub.state.time + 61
+  stub.state.combat = true
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("no result is read in combat", #AuctionObservations(gate), 0)
+  stub.state.combat = false
+
+  -- A refusal of the reader's own events turns off the reader alone.
+  equal("a refused result event is placed at auctionModern",
+    gate.CapabilityForEvent("COMMODITY_SEARCH_RESULTS_UPDATED"), "auctionModern")
+  equal("so is the auction house opening",
+    gate.CapabilityForEvent("AUCTION_HOUSE_SHOW"), "auctionModern")
+  equal("a reported getter is placed at auctionModern too",
+    gate.CapabilityForFunction("C_AuctionHouse.GetBrowseResults"), "auctionModern")
+  gate.SlashCommand("cap auctionModern off")
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("with auctionModern off no result is read", #AuctionObservations(gate), 0)
+  gate.SlashCommand("cap auctionModern on")
+
+  stub.state.printed = {}
+  gate.SlashCommand("status")
+  local text = table.concat(stub.state.printed, "\n")
+  check("status prints the modern auction capability", text:find("auctionModern on", 1, true) ~= nil, text)
+  check("status does not call the auction house idle on forever",
+    text:find("auction recording", 1, true) == nil, text)
+  stub.RemoveModernAuction(_G)
+end
+
+-- A throwing getter, a partial namespace, and an event the client does not
+-- carry: every one is silent.
+do
+  _G.GameTooltip.OnShow = nil
+  stub.InstallModernAuction(_G, { omit = { "GetNumCommoditySearchResults" } })
+  stub.state.invalidEvents = { ITEM_SEARCH_RESULTS_ADDED = true }
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  _G.C_AuctionHouse.GetBrowseResults = function() error("the client refused") end
+  stub.state.printed = {}
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("only the browse events and the one valid item event are registered", gate.auctionModernEvents, 3)
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("a getter that throws writes nothing", #AuctionObservations(gate), 0)
+  equal("and raises nothing", gate.lastError, nil)
+  equal("and prints nothing", #stub.state.printed, 0)
+  stub.state.invalidEvents = {}
+  stub.RemoveModernAuction(_G)
+end
+
+-- Forever with no C_AuctionHouse at all.
+do
+  _G.GameTooltip.OnShow = nil
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.state.printed = {}
+  stub.Fire("PLAYER_ENTERING_WORLD", true, false)
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("a missing auction api registers nothing", gate.auctionModernEvents, nil)
+  equal("a missing auction api writes nothing", #AuctionObservations(gate), 0)
+  equal("a missing auction api prints nothing", #stub.state.printed, 0)
+  equal("a missing auction api raises nothing", gate.lastError, nil)
+  equal("its auction house reads as idle", gate.AuctionMode(), "idle")
+  gate.SlashCommand("status")
+  local text = table.concat(stub.state.printed, "\n")
+  check("status names the idle auction recorder when asked",
+    text:find("auction recording (no auction API this addon can read)", 1, true) ~= nil, text)
+end
+
+-- Retail, with C_AuctionHouse: the site reads Blizzard's API, so the reader
+-- stays idle and asks the client for nothing.
+do
+  _G.GameTooltip.OnShow = nil
+  stub.InstallModernAuction(_G, AUCTION_SPEC)
+  local gate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+  equal("retail's modern auction capability is off", gate.Caps.auctionModern, false)
+  equal("retail's auction house reads as idle", gate.AuctionMode(), "idle")
+  stub.state.printed = {}
+  stub.Fire("PLAYER_ENTERING_WORLD", true, false)
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  stub.Fire("ITEM_SEARCH_RESULTS_UPDATED", { itemID = 19019 })
+  stub.Fire("AUCTION_ITEM_LIST_UPDATE")
+  equal("retail registers no result event", gate.auctionModernEvents, nil)
+  equal("retail writes no auction observation", #AuctionObservations(gate), 0)
+  equal("retail never reads the browse list", stub.state.auctionCalls.GetBrowseResults, nil)
+  equal("retail prints nothing at login", #stub.state.printed, 0)
+  gate.SlashCommand("status")
+  local text = table.concat(stub.state.printed, "\n")
+  check("retail's status says why its auction recording is idle",
+    text:find("auction recording (the site reads Blizzard's auction API)", 1, true) ~= nil, text)
+  stub.RemoveModernAuction(_G)
+end
+
+-- Cataclysm Classic with C_AuctionHouse: the modern reader serves it and the
+-- classic scan steps aside.
+do
+  _G.GameTooltip.OnShow = nil
+  stub.InstallModernAuction(_G, AUCTION_SPEC)
+  local gate = LoadFreshAddon(14, { "4.4.2", "60000", "Sep 17 2026", 40402 })
+  equal("cataclysm classic's modern auction capability is on", gate.Caps.auctionModern, true)
+  equal("cataclysm classic reads its auction house through the modern reader", gate.AuctionMode(), "modern")
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("a cataclysm classic commodity search is recorded", #AuctionObservations(gate), 1)
+  equal("the classic scan steps aside for it", gate.OnAuctionListUpdate(), false)
+  stub.RemoveModernAuction(_G)
+end
+
+-- Classic Era without C_AuctionHouse keeps the classic scan.
+do
+  _G.GameTooltip.OnShow = nil
+  local gate = LoadFreshAddon(2, { "1.15.9", "50000", "Sep 17 2026", 11509 })
+  equal("classic era's modern auction capability is on", gate.Caps.auctionModern, true)
+  equal("but classic era, with no C_AuctionHouse, reads through the classic scan", gate.AuctionMode(), "classic")
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("and registers no modern result event", gate.auctionModernEvents, nil)
 end
 
 --[[
@@ -1369,16 +1668,23 @@ local mainCount = #observations()
 --[[
 0.2.3: a second file from a Forever session, the owner's own build 1.60.1 on
 the mainline project id, so check-file.mjs can prove the site's parser
-reads its forever version key. Combat log and auction are off on Forever, so
-this file holds what that client actually records: an npc sighting, a quest
-start, a vendor, a loot window read off its own source guid, an object, and
-a snapshot.
+reads its forever version key. Combat log and the classic auction scan are
+off on Forever, so this file holds what that client actually records: an npc
+sighting, a quest start, a vendor, a loot window read off its own source
+guid, an object, and a snapshot, and from 0.2.6 a browse page and a
+commodity search read through the modern auction reader.
 ]]
 local foreverOutputPath = (outputPath:gsub("%.lua$", "")) .. "-forever.lua"
 _G.GameTooltip.OnShow = nil
+stub.InstallModernAuction(_G, AUCTION_SPEC)
 local foreverFile = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
 stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 11, isPlayer = true }
 foreverFile.SlashCommand("clear")
+stub.Fire("AUCTION_HOUSE_SHOW")
+stub.state.time = stub.state.time + 61
+stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+stub.RemoveModernAuction(_G)
 stub.state.units.nameplate1 = {
   guid = "Creature-0-3888-0-11-2914-000136DF91", name = "Kobold Vermin",
   level = 3, reaction = 2, classification = "normal",
@@ -1409,7 +1715,12 @@ local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
 equal("the forever file carries the 0.2.6 addon version", foreverDb.addon, "0.2.6")
-check("the forever file holds what that client records", #foreverDb.observations >= 5, #foreverDb.observations)
+check("the forever file holds what that client records", #foreverDb.observations >= 7, #foreverDb.observations)
+local foreverAuctions = 0
+for _, observation in ipairs(foreverDb.observations) do
+  if observation.kind == "auction" then foreverAuctions = foreverAuctions + 1 end
+end
+equal("the forever file holds a browse page and a commodity search", foreverAuctions, 2)
 local foreverHandle = assert(io.open(foreverOutputPath, "w"))
 foreverHandle:write("\nEverythingWoWDB = " .. Serialize(foreverDb, 0) .. "\n")
 foreverHandle:write("EverythingWoWTalentsDB = " .. Serialize(foreverTalents, 0) .. "\n")

@@ -49,6 +49,10 @@ local function reset()
     -- name, so a test can prove a refused RegisterEvent is never followed by
     -- an unregister call at all, rather than merely one that fails quietly.
     unregisterAttempts = {},
+    -- From 0.2.6, a set of event names C_EventUtils.IsEventValid answers
+    -- false for, the way a client answers an event it does not carry.
+    -- Empty by default, so every event is valid.
+    invalidEvents = {},
   }
 end
 reset()
@@ -313,6 +317,12 @@ function stub.Install(env)
 
   env.InCombatLockdown = function() return stub.state.combat == true end
 
+  -- Asked by the modern auction reader before it registers an event. Both
+  -- Retail and the classic clients carry it.
+  env.C_EventUtils = {
+    IsEventValid = function(event) return not stub.state.invalidEvents[event] end,
+  }
+
   env.GameTooltip = {
     HookScript = function(self, which, handler) self[which] = handler end,
   }
@@ -434,6 +444,79 @@ function stub.InstallTraits(env, spec)
     GetSpellName = function(spellId) return ((spec.spells or {})[spellId] or {}).name end,
     GetSpellTexture = function(spellId) return ((spec.spells or {})[spellId] or {}).icon end,
   }
+end
+
+--[[
+C_AuctionHouse's getters over the player's own loaded results, for the
+modern auction reader from 0.2.6. No client stub carries C_AuctionHouse by
+default, so the classic scan's tests read a client without it, exactly as
+the suite always has; a test installs this shape and removes it again.
+
+spec.browse lists browse rows, each an item id, a total quantity, a lowest
+price and an optional battle pet species. spec.commodities maps an item id
+to its listings, each a quantity and a unit price. spec.items maps an item
+id to its auctions, each a quantity and an optional buyout. Every commodity
+and item answer carries an owners list and a bidder, so a test can prove
+neither ever reaches the file. spec.omit names functions to leave out, so a
+test can stand in for a client carrying only part of the namespace. Every
+call is counted in stub.state.auctionCalls by name, and the Send query
+functions are present only so a test can prove the reader never calls one.
+]]
+function stub.InstallModernAuction(env, spec)
+  stub.state.auctionCalls = {}
+  local function count(name) stub.state.auctionCalls[name] = (stub.state.auctionCalls[name] or 0) + 1 end
+  local api = {
+    GetBrowseResults = function()
+      count("GetBrowseResults")
+      local results = {}
+      for _, row in ipairs(spec.browse or {}) do
+        results[#results + 1] = {
+          itemKey = { itemID = row.id, itemLevel = row.level or 0, itemSuffix = 0,
+            battlePetSpeciesID = row.pet or 0 },
+          totalQuantity = row.q, minPrice = row.min, containsOwnerItem = false,
+        }
+      end
+      return results
+    end,
+    GetNumCommoditySearchResults = function(itemId)
+      count("GetNumCommoditySearchResults")
+      return #((spec.commodities or {})[itemId] or {})
+    end,
+    GetCommoditySearchResultInfo = function(itemId, index)
+      count("GetCommoditySearchResultInfo")
+      local row = ((spec.commodities or {})[itemId] or {})[index]
+      if not row then return nil end
+      return {
+        itemID = itemId, quantity = row.q, unitPrice = row.unit, auctionID = 1000 + index,
+        owners = { "SomeSeller" }, totalNumberOfOwners = 1, timeLeftSeconds = 3600,
+        numOwnerItems = 0, containsOwnerItem = false, containsAccountItem = false,
+      }
+    end,
+    GetNumItemSearchResults = function(itemKey)
+      count("GetNumItemSearchResults")
+      return #((spec.items or {})[itemKey.itemID] or {})
+    end,
+    GetItemSearchResultInfo = function(itemKey, index)
+      count("GetItemSearchResultInfo")
+      local row = ((spec.items or {})[itemKey.itemID] or {})[index]
+      if not row then return nil end
+      return {
+        itemKey = itemKey, owners = { "SomeSeller" }, totalNumberOfOwners = 1, timeLeft = 2,
+        auctionID = 2000 + index, quantity = row.q, buyoutAmount = row.buyout,
+        bidder = "Player-3888-0A1B2C3D", minBid = 1,
+        containsOwnerItem = false, containsAccountItem = false, containsSocketedItem = false,
+      }
+    end,
+    SendBrowseQuery = function() count("SendBrowseQuery") end,
+    SendSearchQuery = function() count("SendSearchQuery") end,
+    SendSellSearchQuery = function() count("SendSellSearchQuery") end,
+  }
+  for _, name in ipairs(spec.omit or {}) do api[name] = nil end
+  env.C_AuctionHouse = api
+end
+
+function stub.RemoveModernAuction(env)
+  env.C_AuctionHouse = nil
 end
 
 return stub

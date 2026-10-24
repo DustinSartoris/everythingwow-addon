@@ -201,7 +201,7 @@ so EW.Caps has to exist before either of them runs. WOW_PROJECT_ID and
 GetBuildInfo are both globals the client sets before any addon file
 executes, so neither one needs to wait for the event either.
 ]]
-EW.CAPABILITY_NAMES = { "worldCursor", "unitGuid", "combatLog", "auction" }
+EW.CAPABILITY_NAMES = { "worldCursor", "unitGuid", "combatLog", "auction", "auctionModern" }
 
 -- Forever's own detectable patch line starts at 1.60. Adjust this once the
 -- owner's /dump confirms the interface number and, if Blizzard ever ships an
@@ -223,21 +223,34 @@ being on does not mean C_TooltipInfo.GetWorldCursor is proven safe by this
 probe alone, since the probe never calls it, only registers and unregisters
 the events; it is the owner's own manual `/ewow cap worldCursor on` test,
 with no alert following, that settles it.
+
+0.2.6 adds auctionModern, gating Auction.lua's modern reader: the
+C_AuctionHouse result events and getters the player's own searches fill. On
+the owner's word of 24 October 2026 the addon should upload as much as it
+can, and Forever, whose client carries the Retail project id and so, most
+likely, Retail's C_AuctionHouse, has no Blizzard auction API for the site to
+read, which leaves the player's own browsing as the only source of its
+prices. It is on for Forever and for every classic row, where the reader
+registers nothing unless the client actually carries the functions it
+reads, and off for Retail, whose auctions the site reads from Blizzard's own
+API, and for unknown, the restrictive row. auction stays off for Forever: the
+classic event it gates is still the one the probe refused.
 ]]
 local CAPABILITY_TABLE = {
   -- Retail: every path here is proven, live, in the 0.1.1 sample. Auction
   -- observations on Retail come from Blizzard's own C_AuctionHouse API
   -- rather than from this addon's scan, but the capability still gates
   -- AUCTION_ITEM_LIST_UPDATE and this file's own auction functions, so it is
-  -- on here rather than moot.
-  retail      = { worldCursor = true,  unitGuid = true,  combatLog = true,  auction = true  },
+  -- on here rather than moot. auctionModern is off, from 0.2.6: the modern
+  -- reader would only record what Blizzard's API already gives the site.
+  retail      = { worldCursor = true,  unitGuid = true,  combatLog = true,  auction = true,  auctionModern = false },
   -- Classic Era and Hardcore: C_TooltipInfo does not exist on this client at
   -- all, so worldCursor was already effectively off; unitGuid, combatLog,
   -- and auction are the addon's long standing, unblocked behavior on this
   -- client, where Auction.lua's own scan is what records the auction house
   -- at all, there being no C_AuctionHouse API to read instead.
-  classic_era = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
-  hardcore    = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
+  classic_era = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true,  auctionModern = true  },
+  hardcore    = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true,  auctionModern = true  },
   -- Burning Crusade Classic Anniversary and Mists of Pandaria Classic, from
   -- 0.2.4: the same row as Classic Era's. Neither client has
   -- C_TooltipInfo.GetWorldCursor, both keep the combat log, and unitGuid is
@@ -245,21 +258,27 @@ local CAPABILITY_TABLE = {
   -- on as it is on Classic Era: Auction.lua's own scan runs only where
   -- C_AuctionHouse is absent and steps aside where it exists, as it does on
   -- Retail, so the row holds whichever auction window the client carries.
-  classic_tbc = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
-  classic_mop = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
+  classic_tbc = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true,  auctionModern = true  },
+  classic_mop = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true,  auctionModern = true  },
   -- Wrath of the Lich King Classic and Cataclysm Classic, from 0.2.5: the
   -- same row again, for the same reasons. worldCursor stays off as on every
   -- classic row, both clients keep the combat log and the classic GUID
   -- reader, and auction is on because Auction.lua's own scan steps aside
   -- wherever C_AuctionHouse exists, so the row holds whichever auction
-  -- window the client carries.
-  classic_wrath = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
-  classic_cata  = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true  },
+  -- window the client carries. auctionModern is on for every classic row
+  -- from 0.2.6, for a client among them that carries C_AuctionHouse, where
+  -- the classic scan steps aside; on one without it the reader registers
+  -- nothing.
+  classic_wrath = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true,  auctionModern = true  },
+  classic_cata  = { worldCursor = false, unitGuid = true,  combatLog = true,  auction = true,  auctionModern = true  },
   -- Forever: settled by the owner's own probe and capability tests above.
-  forever     = { worldCursor = true,  unitGuid = true,  combatLog = false, auction = false },
+  -- auctionModern is on from 0.2.6: the player's own searches are the only
+  -- auction source the site has for Forever, and the reader asks for nothing
+  -- the client does not already show the player.
+  forever     = { worldCursor = true,  unitGuid = true,  combatLog = false, auction = false, auctionModern = true  },
   -- A client this table cannot place: the same row 0.2.1 gave Forever before
   -- any probe existed, because the safe default is the restrictive one.
-  unknown     = { worldCursor = false, unitGuid = false, combatLog = false, auction = false },
+  unknown     = { worldCursor = false, unitGuid = false, combatLog = false, auction = false, auctionModern = false },
 }
 
 --[[ A fresh capability table for a client key, defaulting to the unknown
@@ -361,6 +380,18 @@ local FUNCTION_CAPABILITY = {
   GetNumAuctionItems = "auction",
   GetAuctionItemLink = "auction",
   GetAuctionItemInfo = "auction",
+  -- From 0.2.6, every C_AuctionHouse getter Auction.lua's modern reader
+  -- calls, by its bare name and its qualified one, placed at auctionModern.
+  GetBrowseResults = "auctionModern",
+  GetNumCommoditySearchResults = "auctionModern",
+  GetCommoditySearchResultInfo = "auctionModern",
+  GetNumItemSearchResults = "auctionModern",
+  GetItemSearchResultInfo = "auctionModern",
+  ["C_AuctionHouse.GetBrowseResults"] = "auctionModern",
+  ["C_AuctionHouse.GetNumCommoditySearchResults"] = "auctionModern",
+  ["C_AuctionHouse.GetCommoditySearchResultInfo"] = "auctionModern",
+  ["C_AuctionHouse.GetNumItemSearchResults"] = "auctionModern",
+  ["C_AuctionHouse.GetItemSearchResultInfo"] = "auctionModern",
 }
 
 function EW.CapabilityForFunction(fn)
@@ -389,6 +420,15 @@ local EVENT_CAPABILITY = {
   PLAYER_TARGET_CHANGED = "unitGuid",
   COMBAT_LOG_EVENT_UNFILTERED = "combatLog",
   AUCTION_ITEM_LIST_UPDATE = "auction",
+  -- From 0.2.6, the modern reader's events: a refusal of any of them turns
+  -- off auctionModern alone, never the classic scan or anything else.
+  AUCTION_HOUSE_SHOW = "auctionModern",
+  AUCTION_HOUSE_BROWSE_RESULTS_UPDATED = "auctionModern",
+  AUCTION_HOUSE_BROWSE_RESULTS_ADDED = "auctionModern",
+  COMMODITY_SEARCH_RESULTS_UPDATED = "auctionModern",
+  COMMODITY_SEARCH_RESULTS_ADDED = "auctionModern",
+  ITEM_SEARCH_RESULTS_UPDATED = "auctionModern",
+  ITEM_SEARCH_RESULTS_ADDED = "auctionModern",
 }
 
 function EW.CapabilityForEvent(event)
@@ -873,6 +913,15 @@ EW.PROBE_EVENTS = {
   "QUEST_COMPLETE",
   "MERCHANT_SHOW",
   "AUCTION_ITEM_LIST_UPDATE",
+  -- From 0.2.6, the modern auction reader's, so the owner can ask a client
+  -- about them before ever opening its auction house.
+  "AUCTION_HOUSE_SHOW",
+  "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED",
+  "AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
+  "COMMODITY_SEARCH_RESULTS_UPDATED",
+  "COMMODITY_SEARCH_RESULTS_ADDED",
+  "ITEM_SEARCH_RESULTS_UPDATED",
+  "ITEM_SEARCH_RESULTS_ADDED",
 }
 
 --[[ Probes one event and returns whether the client allowed it. A refused
@@ -975,6 +1024,25 @@ local function CapsLine()
 end
 EW.CapsLine = CapsLine
 
+--[[ The recorders that cannot run on this client, as one line, or nil when
+     every recorder runs. The kill counter needs the combat log, and the
+     auction house is idle where neither the classic scan nor the modern
+     reader can read it, which on Retail is by design. ]]
+local function IdleLine()
+  local parts = {}
+  if EW.Caps and not EW.Caps.combatLog then
+    parts[#parts + 1] = "kill counter (combatLog off)"
+  end
+  if EW.AuctionMode and EW.AuctionMode() == "idle" then
+    local retail = EW.Client and EW.Client.key == "retail"
+    parts[#parts + 1] = retail and "auction recording (the site reads Blizzard's auction API)"
+      or "auction recording (no auction API this addon can read)"
+  end
+  if #parts == 0 then return nil end
+  return table.concat(parts, ", ")
+end
+EW.IdleLine = IdleLine
+
 local function Status()
   local db = EW.Database()
   local counts = {}
@@ -997,6 +1065,10 @@ local function Status()
     EW.Client and tostring(EW.Client.version) or "?"))
   local caps = CapsLine()
   if caps then EW.Print("capabilities: " .. caps) end
+  -- From 0.2.6 an idle recorder says so here, when the player asks, and
+  -- nowhere else: 0.2.2's login line for the idle auction recorder is gone.
+  local idle = IdleLine()
+  if idle then EW.Print("idle on this client: " .. idle .. ".") end
   local lastForbidden = db.lastForbidden
   if lastForbidden then
     EW.Print(string.format("last forbidden action: %s for %s on build %s (client %s).",
