@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.6"
+EW.ADDON_VERSION = "0.2.7"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -28,6 +28,18 @@ EW.MAX_OBSERVATIONS = 5000
 -- the writer trims before it stores.
 EW.PAYLOAD_CAP = 4000
 EW.SNAPSHOT_PAYLOAD_CAP = 64000
+-- The byte budgets, in bytes of JSON as the upload page measures them. From
+-- 0.2.7 the buffer is held to these as well as to MAX_OBSERVATIONS, because
+-- Forever's auction pages run to about 1.5 KB of JSON each, about 2.6 KB in
+-- the saved file, and 5,000 of them wrote a file past the 8 MB the upload
+-- page reads. The saved file runs about 1.65 times its JSON, so 3,600,000
+-- bytes of JSON is about 6 MB on disk, and it also sits under the
+-- 3,900,000 byte body the upload page sends in one go, so every observation
+-- the file holds goes up in one upload. Auction pages have their own
+-- budget inside it and give up their own oldest first, so a long session
+-- at the auction house never pushes out the NPCs, loot, and quests.
+EW.MAX_FILE_BYTES = 3600000
+EW.MAX_AUCTION_BYTES = 1200000
 -- One pin sighting per subject per map per five minutes.
 EW.DEDUPE_SECONDS = 300
 
@@ -695,10 +707,92 @@ local function DedupeKey(kind, subject, id, map)
 end
 
 --[[
+The buffer's running byte totals, held for the session and never saved. They
+belong to one observations table, so a cleared or replaced table is measured
+again from scratch the first time it is asked about.
+]]
+local budget = { list = nil, total = 0, auction = 0 }
+
+local function Budget(db)
+  if budget.list ~= db.observations then
+    budget.list = db.observations
+    budget.total = 0
+    budget.auction = 0
+    for _, observation in ipairs(db.observations) do
+      local bytes = EW.JsonBytes(observation)
+      budget.total = budget.total + bytes
+      if observation.kind == "auction" then budget.auction = budget.auction + bytes end
+    end
+  end
+  return budget
+end
+
+--[[ The buffer's size in bytes of JSON, total and auction pages alone. ]]
+function EW.BufferBytes()
+  local current = Budget(EW.Database())
+  return current.total, current.auction
+end
+
+--[[
+Holds the buffer to its three limits, counting every observation it lets go
+in dropped: MAX_OBSERVATIONS by dropping the oldest, MAX_AUCTION_BYTES by
+dropping the oldest auction page, and MAX_FILE_BYTES by dropping the oldest.
+The newest observation is never dropped. It runs after every write and once
+when the addon loads, so a file already over budget shrinks the next time
+the game writes it. It marks first and closes the gaps in one pass, so
+cutting a large file back at login costs one walk of the buffer rather than
+one shift of it per observation let go.
+]]
+function EW.Prune()
+  local db = EW.Database()
+  local list = db.observations
+  local current = Budget(db)
+  local count = #list
+  if count <= EW.MAX_OBSERVATIONS and current.auction <= EW.MAX_AUCTION_BYTES
+    and current.total <= EW.MAX_FILE_BYTES then
+    return
+  end
+
+  local drop = {}
+  local dropped = 0
+  local function Mark(index)
+    local observation = list[index]
+    local bytes = EW.JsonBytes(observation)
+    current.total = current.total - bytes
+    if observation.kind == "auction" then current.auction = current.auction - bytes end
+    drop[index] = true
+    dropped = dropped + 1
+  end
+
+  for index = 1, count - EW.MAX_OBSERVATIONS do Mark(index) end
+  local index = 1
+  while current.auction > EW.MAX_AUCTION_BYTES and index < count do
+    if not drop[index] and list[index].kind == "auction" then Mark(index) end
+    index = index + 1
+  end
+  index = 1
+  while current.total > EW.MAX_FILE_BYTES and index < count do
+    if not drop[index] then Mark(index) end
+    index = index + 1
+  end
+  if dropped == 0 then return end
+
+  local kept = 0
+  for position = 1, count do
+    if not drop[position] then
+      kept = kept + 1
+      list[kept] = list[position]
+    end
+  end
+  for position = count, kept + 1, -1 do list[position] = nil end
+  db.dropped = db.dropped + dropped
+end
+
+--[[
 The one writer. Every recorder calls this and nothing else touches the saved
 table. It applies the de-duplication rule, trims the payload to its cap, and
-keeps the buffer at MAX_OBSERVATIONS by dropping the oldest observation and
-counting it in dropped.
+keeps the buffer inside MAX_OBSERVATIONS and the byte budgets through
+EW.Prune, which drops the oldest observation and counts it in dropped.
 ]]
 function EW.Record(kind, subject, id, map, x, y, payload)
   if not KIND_SET[kind] then return false end
@@ -735,11 +829,12 @@ function EW.Record(kind, subject, id, map, x, y, payload)
   }
 
   local list = db.observations
+  local budget = Budget(db)
   list[#list + 1] = observation
-  while #list > EW.MAX_OBSERVATIONS do
-    table.remove(list, 1)
-    db.dropped = db.dropped + 1
-  end
+  local bytes = EW.JsonBytes(observation)
+  budget.total = budget.total + bytes
+  if kind == "auction" then budget.auction = budget.auction + bytes end
+  EW.Prune()
   return true
 end
 
@@ -805,7 +900,11 @@ end
 frame:SetScript("OnEvent", function(_, event, ...)
   if event == "ADDON_LOADED" then
     local name = ...
-    if name == ADDON_NAME then EW.Database() end
+    if name == ADDON_NAME then
+      EW.Database()
+      -- A file a release before 0.2.7 wrote can be over the byte budgets.
+      pcall(EW.Prune)
+    end
   end
   EW.Dispatch(event, ...)
 end)

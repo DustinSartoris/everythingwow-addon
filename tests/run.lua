@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.6")
+equal("addon is the addon version", saved.addon, "0.2.7")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -414,6 +414,87 @@ end
 equal("the buffer holds five thousand observations", #observations(), 5000)
 equal("the oldest are dropped and counted", db().dropped, 100)
 equal("the oldest is gone", observations()[1].id, 900101)
+
+-- The byte budgets, from 0.2.7. Auction pages give up their own oldest first
+-- and never push out the rest, the whole buffer stays under its file budget,
+-- and a file already over budget shrinks when the addon loads.
+local function AuctionPage(seed)
+  local rows = {}
+  for index = 1, 50 do
+    rows[index] = { id = 100000 + seed * 100 + index, q = 20, unit = 123456789, buyout = 987654321 }
+  end
+  return { source = "browse", items = rows }
+end
+local function AuctionBytes()
+  local _, auction = EW.BufferBytes()
+  return auction
+end
+local function JsonTotal()
+  local total, auction = 0, 0
+  for _, observation in ipairs(observations()) do
+    local bytes = EW.JsonBytes(observation)
+    total = total + bytes
+    if observation.kind == "auction" then auction = auction + bytes end
+  end
+  return total, auction
+end
+
+clear()
+for index = 1, 50 do
+  EW.Record("npc", "npc", 910000 + index, 84, 0.5, 0.5, { level = 1 })
+end
+local auctionPages = 0
+while AuctionBytes() <= EW.MAX_AUCTION_BYTES - 4000 do
+  auctionPages = auctionPages + 1
+  EW.Record("auction", "auction", nil, nil, nil, nil, AuctionPage(auctionPages))
+end
+equal("nothing is dropped while auction pages fit their budget", db().dropped, 0)
+for index = 1, 200 do
+  auctionPages = auctionPages + 1
+  EW.Record("auction", "auction", nil, nil, nil, nil, AuctionPage(auctionPages))
+end
+check("auction pages stay inside their budget", AuctionBytes() <= EW.MAX_AUCTION_BYTES, AuctionBytes())
+check("pages over the auction budget are dropped and counted", db().dropped >= 200, db().dropped)
+equal("auction pages never push out an npc", observations()[1].id, 910001)
+local npcsLeft = 0
+for _, observation in ipairs(observations()) do
+  if observation.kind == "npc" then npcsLeft = npcsLeft + 1 end
+end
+equal("every npc is still held", npcsLeft, 50)
+equal("the newest auction page is held", last().payload.items[1].id, 100000 + auctionPages * 100 + 1)
+local runningTotal, runningAuction = EW.BufferBytes()
+local measuredTotal, measuredAuction = JsonTotal()
+equal("the running total matches a fresh measure", runningTotal, measuredTotal)
+equal("the running auction total matches a fresh measure", runningAuction, measuredAuction)
+
+-- The file budget binds on everything, oldest first.
+clear()
+local big = {}
+for index = 1, 60 do big[index] = { id = 200000 + index, price = 123456, currency = 1166 } end
+for index = 1, 1600 do
+  EW.Record("vendor", "vendor", 920000 + index, 84, 0.1, 0.1, { items = big })
+end
+local fileTotal = EW.BufferBytes()
+check("the buffer stays under its file budget", fileTotal <= EW.MAX_FILE_BYTES, fileTotal)
+check("the file budget drops the oldest", observations()[1].id > 920001, observations()[1].id)
+equal("the newest vendor is held", last().id, 921600)
+
+-- A file written before 0.2.7, over both budgets, shrinks when the addon loads.
+local oversized = { schema = 1, version = "forever", observations = {}, dropped = 0 }
+for index = 1, 4000 do
+  oversized.observations[index] = {
+    kind = "auction", subject = "auction", t = index, payload = AuctionPage(index),
+  }
+end
+_G.EverythingWoWDB = oversized
+stub.Fire("ADDON_LOADED", "EverythingWoW")
+local loadedTotal, loadedAuction = EW.BufferBytes()
+check("an old oversized file is pruned to the auction budget", loadedAuction <= EW.MAX_AUCTION_BYTES, loadedAuction)
+check("an old oversized file is pruned to the file budget", loadedTotal <= EW.MAX_FILE_BYTES, loadedTotal)
+equal("pruning keeps the newest page", last().t, 4000)
+equal("pruning counts what it let go", db().dropped, 4000 - #observations())
+_G.EverythingWoWDB = nil
+clear()
 
 -- Byte trimming, on a payload nothing else would cap.
 clear()
@@ -755,8 +836,8 @@ do
   local text = table.concat(stub.state.printed, "\n")
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
-  check("status prints the 0.2.6 addon version",
-    text:find("version 0.2.6", 1, true) ~= nil, text)
+  check("status prints the 0.2.7 addon version",
+    text:find("version 0.2.7", 1, true) ~= nil, text)
 end
 
 --[[
@@ -1339,7 +1420,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.2.6")
+  equal("the capture holds the addon version", capture.addon, "0.2.7")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -1714,7 +1795,7 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.6 addon version", foreverDb.addon, "0.2.6")
+equal("the forever file carries the 0.2.7 addon version", foreverDb.addon, "0.2.7")
 check("the forever file holds what that client records", #foreverDb.observations >= 7, #foreverDb.observations)
 local foreverAuctions = 0
 for _, observation in ipairs(foreverDb.observations) do
@@ -1761,7 +1842,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.6 addon version", saved.addon, "0.2.6")
+  equal("the " .. suffix .. " file carries the 0.2.7 addon version", saved.addon, "0.2.7")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)
