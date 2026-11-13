@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.7")
+equal("addon is the addon version", saved.addon, "0.2.8")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -142,6 +142,55 @@ local afterRare = #observations()
 stub.state.units.mouseover = { guid = "Player-3888-0A1B2C3D", name = "Someone", isPlayer = true }
 stub.Fire("UPDATE_MOUSEOVER_UNIT")
 equal("another player is never recorded", #observations(), afterRare)
+
+-- 0.2.8: the creature type, and the title from the unit's own tooltip.
+clear()
+stub.state.units.mouseover = {
+  guid = "Creature-0-3888-0-11-6740-000136DFC1", name = "Innkeeper Allison", level = 30,
+  reaction = 5, classification = "normal", creatureType = "Humanoid",
+}
+stub.state.tooltip = { unit = "mouseover", line2 = "Innkeeper" }
+stub.Fire("UPDATE_MOUSEOVER_UNIT")
+equal("an npc carries its creature type", last().payload.creature_type, "Humanoid")
+equal("an npc carries the title its tooltip shows", last().payload.title, "Innkeeper")
+
+clear()
+stub.state.units.mouseover = {
+  guid = "Creature-0-3888-0-11-6741-000136DFC2", name = "Mottled Boar", level = 2,
+  reaction = 4, classification = "normal", creatureType = "Beast",
+}
+stub.state.tooltip = { unit = "mouseover", line2 = "Level 2 Beast" }
+stub.Fire("UPDATE_MOUSEOVER_UNIT")
+equal("a creature with no title still carries its type", last().payload.creature_type, "Beast")
+equal("the level line is never taken for a title", last().payload.title, nil)
+
+clear()
+stub.state.units.nameplate1 = {
+  guid = "Creature-0-3888-0-11-6742-000136DFC3", name = "Stormwind Guard", level = 55,
+  reaction = 5, classification = "normal", creatureType = "Humanoid",
+}
+stub.state.tooltip = { unit = "mouseover", line2 = "Innkeeper" }
+stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+equal("a tooltip on another unit gives no title", last().payload.title, nil)
+equal("and the type is still read from the unit itself", last().payload.creature_type, "Humanoid")
+
+clear()
+stub.state.units.mouseover = {
+  guid = "Creature-0-3888-0-11-6743-000136DFC4", name = "Odd One", level = 10,
+  reaction = 4, classification = "normal",
+}
+stub.state.tooltip = { unit = "mouseover", line2 = "|cffff0000Painted|r" }
+stub.Fire("UPDATE_MOUSEOVER_UNIT")
+equal("a line with a color code is not a title", last().payload.title, nil)
+equal("no creature type is written where the client names none", last().payload.creature_type, nil)
+stub.state.tooltip = { unit = "mouseover", line2 = string.rep("x", 65) }
+stub.state.units.mouseover.guid = "Creature-0-3888-0-11-6744-000136DFC5"
+stub.Fire("UPDATE_MOUSEOVER_UNIT")
+equal("a line past 64 characters is not a title", last().payload.title, nil)
+stub.state.tooltip = nil
+stub.state.units.mouseover.guid = "Creature-0-3888-0-11-6745-000136DFC6"
+stub.Fire("UPDATE_MOUSEOVER_UNIT")
+equal("no tooltip gives no title", last().payload.title, nil)
 
 -- Quests.
 clear()
@@ -837,7 +886,7 @@ do
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
   check("status prints the 0.2.7 addon version",
-    text:find("version 0.2.7", 1, true) ~= nil, text)
+    text:find("version 0.2.8", 1, true) ~= nil, text)
 end
 
 --[[
@@ -1420,7 +1469,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.2.7")
+  equal("the capture holds the addon version", capture.addon, "0.2.8")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -1795,7 +1844,7 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.7 addon version", foreverDb.addon, "0.2.7")
+equal("the forever file carries the 0.2.8 addon version", foreverDb.addon, "0.2.8")
 check("the forever file holds what that client records", #foreverDb.observations >= 7, #foreverDb.observations)
 local foreverAuctions = 0
 for _, observation in ipairs(foreverDb.observations) do
@@ -1842,7 +1891,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.7 addon version", saved.addon, "0.2.7")
+  equal("the " .. suffix .. " file carries the 0.2.8 addon version", saved.addon, "0.2.8")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)

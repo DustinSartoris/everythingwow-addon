@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.7"
+EW.ADDON_VERSION = "0.2.8"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it

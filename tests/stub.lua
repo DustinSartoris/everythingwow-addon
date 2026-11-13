@@ -199,6 +199,7 @@ function stub.Install(env)
   env.UnitName = function(token) return (unit(token) or {}).name end
   env.UnitLevel = function(token) return (unit(token) or {}).level end
   env.UnitClassification = function(token) return (unit(token) or {}).classification end
+  env.UnitCreatureType = function(token) return (unit(token) or {}).creatureType end
   env.UnitPlayerControlled = function(token) return (unit(token) or {}).playerControlled == true end
   env.UnitIsUnit = function(first, second)
     local one, two = unit(first), unit(second)
@@ -323,9 +324,24 @@ function stub.Install(env)
     IsEventValid = function(event) return not stub.state.invalidEvents[event] end,
   }
 
+  -- The unit tooltip. stub.state.tooltip names the unit token it is showing
+  -- and its second line; with neither set it shows no unit, as on a client
+  -- whose pointer is over nothing.
   env.GameTooltip = {
     HookScript = function(self, which, handler) self[which] = handler end,
+    GetUnit = function()
+      local tip = stub.state.tooltip
+      if not tip or not tip.unit then return nil, nil end
+      return (unit(tip.unit) or {}).name, tip.unit
+    end,
   }
+  env.GameTooltipTextLeft2 = {
+    GetText = function()
+      local tip = stub.state.tooltip
+      return tip and tip.line2 or nil
+    end,
+  }
+  env.LEVEL = "Level"
 
   return env
 end

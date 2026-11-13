@@ -7,6 +7,9 @@ place a creature id can be read. UnitClassification separates a rare from an
 ordinary creature, and the two are recorded under their own kinds so the
 site's rare layer is a layer and not a filter over everything.
 
+Since 0.2.8 an observation also carries the creature's type, and the title
+under its name where the client is showing that creature's tooltip.
+
 What this recorder cannot capture: the vendor and quest giver flags Section
 9.2 names. Nothing on a nameplate says whether a creature sells or gives a
 quest, so those flags are left to the vendor and quest recorders, which know
@@ -44,6 +47,57 @@ local function PlayerOwned(unit)
   return "vehicle"
 end
 EW.PlayerOwned = PlayerOwned
+
+--[[
+The creature type the client names for a unit, "Beast" or "Humanoid", in the
+client's own language. The worker keeps only the names it knows, so a client
+in another language adds nothing rather than a second vocabulary.
+]]
+local function CreatureType(unit)
+  local value
+  pcall(function()
+    if type(rawget(_G, "UnitCreatureType")) == "function" then
+      value = UnitCreatureType(unit)
+    end
+  end)
+  if type(value) == "string" and value ~= "" and #value <= 32 then return value end
+  return nil
+end
+
+--[[
+The line a creature carries under its name, "Innkeeper" or "Flight Master".
+No unit function returns it. The one place the client shows it is the second
+line of the unit's own tooltip, and only while the tooltip is on that unit,
+so it is read there or not at all. A creature with no title has its level
+line second, which is told apart by the client's own word for level, and is
+never recorded as a title. A player owned unit never reaches this function.
+]]
+local TITLE_MAX = 64
+local function TooltipTitle(unit)
+  local title
+  pcall(function()
+    local tip = rawget(_G, "GameTooltip")
+    if type(tip) ~= "table" or type(tip.GetUnit) ~= "function" then return end
+    local _, tipUnit = tip:GetUnit()
+    if type(tipUnit) ~= "string" then return end
+    if tipUnit ~= unit then
+      if type(rawget(_G, "UnitIsUnit")) ~= "function" or not UnitIsUnit(tipUnit, unit) then return end
+    end
+    local line = rawget(_G, "GameTooltipTextLeft2")
+    if type(line) ~= "table" or type(line.GetText) ~= "function" then return end
+    local text = line:GetText()
+    if type(text) ~= "string" then return end
+    text = text:gsub("^%s+", ""):gsub("%s+$", "")
+    if text == "" or #text > TITLE_MAX then return end
+    if text:find("[|<>%c]") then return end
+    local levelWord = rawget(_G, "LEVEL")
+    if type(levelWord) ~= "string" or levelWord == "" then levelWord = "Level" end
+    if text:find(levelWord, 1, true) then return end
+    title = text
+  end)
+  return title
+end
+EW.TooltipTitle = TooltipTitle
 
 local function RecordUnit(unit)
   if not unit or not UnitExists(unit) then return end
@@ -89,6 +143,10 @@ local function RecordUnit(unit)
   local reaction = UnitReaction("player", unit)
   if type(reaction) == "number" then payload.reaction = reaction end
   if classification then payload.classification = classification end
+  local creatureType = CreatureType(unit)
+  if creatureType then payload.creature_type = creatureType end
+  local title = TooltipTitle(unit)
+  if title then payload.title = title end
 
   EW.Record(isRare and "rare" or "npc", isRare and "rare" or "npc", id, mapId, x, y, payload)
 end
