@@ -28,7 +28,8 @@ drawn from, each inside pcall, and no new event:
   GetRewardText.
 
   At both, where the window shows them: rewards and choices, each a list of
-  { id, q } from GetQuestItemInfo and GetQuestItemLink; money in copper from
+  { id, q, n } from GetQuestItemInfo and GetQuestItemLink, n being the item's
+  name as the window shows it; money in copper from
   GetRewardMoney; xp from GetRewardXP; and level, the quest's level, where
   the client has C_QuestLog.GetQuestDifficultyLevel.
 
@@ -53,6 +54,7 @@ EW.QUEST_TEXT_BYTES = 1600
 EW.QUEST_OBJECTIVES_BYTES = 600
 EW.QUEST_COMPLETION_BYTES = 1200
 EW.QUEST_REWARD_CAP = 10
+EW.QUEST_ITEM_NAME_BYTES = 80
 -- Room left under the reader's cap for the keys and the small fields.
 EW.QUEST_PAYLOAD_BYTES = 3800
 
@@ -151,18 +153,25 @@ local function QuestItems(kind, countFunction)
   if count > EW.QUEST_REWARD_CAP then count = EW.QUEST_REWARD_CAP end
   for index = 1, count do
     pcall(function()
-      local itemId, quantity
+      local itemId, quantity, name
       if type(rawget(_G, "GetQuestItemLink")) == "function" then
         itemId = EW.IdFromLink and EW.IdFromLink(GetQuestItemLink(kind, index)) or nil
       end
       if type(rawget(_G, "GetQuestItemInfo")) == "function" then
-        local _, _, itemCount, _, _, infoId = GetQuestItemInfo(kind, index)
-        quantity = itemCount
+        local itemName, _, itemCount, _, _, infoId = GetQuestItemInfo(kind, index)
+        quantity, name = itemCount, itemName
         if not itemId and type(infoId) == "number" and infoId > 0 then itemId = infoId end
       end
       if type(itemId) == "number" and itemId > 0 then
         local entry = { id = math.floor(itemId) }
         if type(quantity) == "number" and quantity > 1 then entry.q = math.floor(quantity) end
+        -- The item's name as the window shows it, so the site can name a
+        -- reward Blizzard's item index does not hold. A name with a pipe, a
+        -- control character or more than 80 bytes is left out.
+        if type(name) == "string" and name ~= "" and #name <= EW.QUEST_ITEM_NAME_BYTES
+          and not name:find("|", 1, true) and not name:find("%c") then
+          entry.n = name
+        end
         items[#items + 1] = entry
       end
     end)
@@ -191,13 +200,24 @@ local function Fit(payload)
       local value = payload[field]
       if type(value) == "string" and #value > length then longest, length = field, #value end
     end
-    if not longest then break end
-    if length <= 200 then
-      payload[longest] = nil
+    if not longest then
+      -- No text is left to shorten: the item names go, and the ids stay.
+      local named = false
+      for _, list in ipairs({ payload.choices or {}, payload.rewards or {} }) do
+        for _, entry in ipairs(list) do
+          if entry.n ~= nil then entry.n, named = nil, true end
+        end
+      end
+      if not named then break end
+      payload.cut = true
     else
-      payload[longest] = CutBytes(payload[longest], length - 200)
+      if length <= 200 then
+        payload[longest] = nil
+      else
+        payload[longest] = CutBytes(payload[longest], length - 200)
+      end
+      payload.cut = true
     end
-    payload.cut = true
   end
   return payload
 end

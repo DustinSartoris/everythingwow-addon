@@ -236,7 +236,7 @@ function stub.Install(env)
   env.GetQuestItemInfo = function(kind, index)
     local row = questItems(kind)[index]
     if not row then return nil end
-    return "Reward", nil, row.q or 1, 1, true, row.id
+    return row.name or "Reward", nil, row.q or 1, 1, true, row.id
   end
   env.GetRewardMoney = function() return stub.state.questMoney or 0 end
   env.GetRewardXP = function() return stub.state.questXp or 0 end

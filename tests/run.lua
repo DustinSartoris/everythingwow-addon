@@ -213,8 +213,11 @@ stub.state.questTitle = "Scarab Shells"
 stub.state.questText = "Thalos, my cousin in Booty Bay needs shells.\r\n\r\nBring them to me, |cffffd200Thalos|r!"
 stub.state.questObjectives = "Bring 5 Uncracked Scarab Shells to Tran'rek in Gadgetzan."
 stub.state.questCompletion = "Oh, great! You got them!\n\nThanks, Thalos. You're a real lifesaver!"
-stub.state.questRewards = { { id = 9527 }, { id = 4306, q = 5 } }
-stub.state.questChoices = { { id = 9531 }, { id = 270098, noLink = true } }
+stub.state.questRewards = { { id = 9527, name = "Spellshifter Rod" }, { id = 4306, q = 5, name = "Silk Cloth" } }
+stub.state.questChoices = {
+  { id = 9531, name = "Gemshale Pauldrons" }, { id = 270098, noLink = true, name = "Dank Shoulderpads" },
+  { id = 9533, name = "A |cffff0000painted|r name" },
+}
 stub.state.questMoney = 8500
 stub.state.questXp = 2650
 _G.C_QuestLog = { GetQuestDifficultyLevel = function(questId) return questId == 2865 and 45 or 0 end }
@@ -230,8 +233,12 @@ equal("the offer lists the rewards", #offered.payload.rewards, 2)
 equal("a reward's id is read from its link", offered.payload.rewards[1].id, 9527)
 equal("a reward of one writes no quantity", offered.payload.rewards[1].q, nil)
 equal("a reward of several writes how many", offered.payload.rewards[2].q, 5)
-equal("the offer lists the choices", #offered.payload.choices, 2)
+equal("the offer lists the choices", #offered.payload.choices, 3)
 equal("a choice with no link is read from its item info", offered.payload.choices[2].id, 270098)
+equal("a reward carries its name as the window shows it", offered.payload.rewards[1].n, "Spellshifter Rod")
+equal("so does a choice the item index may not hold", offered.payload.choices[2].n, "Dank Shoulderpads")
+equal("a name with a color code is left out and its id kept", offered.payload.choices[3].n, nil)
+equal("with its id", offered.payload.choices[3].id, 9533)
 equal("the offer records the money in copper", offered.payload.money, 8500)
 equal("the offer records the experience", offered.payload.xp, 2650)
 equal("the offer records the quest's level", offered.payload.level, 45)
