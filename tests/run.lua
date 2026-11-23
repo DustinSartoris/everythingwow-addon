@@ -44,7 +44,7 @@ end
 
 stub.Install(_G)
 
-local FILES = { "Core", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Talents", "Auction", "Deals" }
+local FILES = { "Core", "Items", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Talents", "Auction", "Deals" }
 
 --[[ Loads every addon file fresh into a new table, the way the game loads
      them once at login: EW.Client and EW.Caps are computed as Core.lua
@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.11")
+equal("addon is the addon version", saved.addon, "0.2.12")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -997,7 +997,7 @@ do
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
   check("status prints the 0.2.7 addon version",
-    text:find("version 0.2.11", 1, true) ~= nil, text)
+    text:find("version 0.2.12", 1, true) ~= nil, text)
 end
 
 --[[
@@ -1493,6 +1493,230 @@ do
 end
 
 --[[
+0.2.12: the item recorder in Items.lua. Blizzard's item API answers 404 for
+the new WoW Forever items its own auction houses sell, so the addon notes
+such an item once, from the client's item cache, wherever a recorder meets
+one. The stand in cache below answers GetItemInfo, GetItemStats and
+GetItemSpell from ITEM_CACHE; an id it does not hold is an item the client
+has not loaded yet.
+]]
+do
+  local ITEM_CACHE = {
+    [263015] = { name = "Skyborne Scout's Hood", quality = 3, level = 48, min = 43, stack = 1,
+      slot = "INVTYPE_HEAD", sell = 12045, class = 4, subclass = 2, bind = 2,
+      stats = { ITEM_MOD_STAMINA_SHORT = 9, ITEM_MOD_AGILITY_SHORT = 14, RESISTANCE0_NAME = 112,
+        ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 12.3456, lowercase_key = 4, ZERO = 0, ["BAD KEY"] = 3 } },
+    [274048] = { name = "Zephras Dustbloom", quality = 1, level = 40, min = 0, stack = 200,
+      slot = "", sell = 95, class = 7, subclass = 9, spell = 440221 },
+    [216483] = { name = "Painted |cffff0000Thing|r", quality = 1, level = 1 },
+    [19019] = { name = "Thunderfury", quality = 5, level = 80, sell = 30000000 },
+  }
+  local asked = {}
+  local function InstallItemCache()
+    _G.GetItemInfo = function(item)
+      asked[#asked + 1] = item
+      local row = type(item) == "number" and ITEM_CACHE[item] or nil
+      if not row then return nil end
+      return row.name, "|cffffffff|Hitem:" .. item .. "::::::::80:::::|h[" .. row.name .. "]|h|r", row.quality,
+        row.level, row.min, "Armor", "Leather", row.stack, row.slot, 135000, row.sell, row.class, row.subclass,
+        row.bind, 0, nil, false
+    end
+    _G.GetItemStats = function(link)
+      local id = tonumber(tostring(link):match("^item:(%d+)$"))
+      local row = id and ITEM_CACHE[id] or nil
+      return row and row.stats or nil
+    end
+    _G.GetItemSpell = function(item)
+      local row = ITEM_CACHE[item]
+      if row and row.spell then return "Use", row.spell end
+      return nil
+    end
+  end
+  local function RemoveItemCache()
+    _G.GetItemInfo, _G.GetItemStats, _G.GetItemSpell = nil, nil, nil
+  end
+  local function Items(addon)
+    local list = {}
+    for _, observation in ipairs(addon.Database().observations) do
+      if observation.kind == "item" then list[#list + 1] = observation end
+    end
+    return list
+  end
+
+  local savedLoot, savedMerchant, savedTime = stub.state.loot, stub.state.merchant, stub.state.time
+  local savedRewards, savedQuestId, savedQuestTitle = stub.state.questRewards, stub.state.questId, stub.state.questTitle
+  local savedNpc = stub.state.units.npc
+  InstallItemCache()
+  -- The auction house is the modern one, as on the owner's client, and it
+  -- has to stand before the addon loads for the reader to find it.
+  stub.InstallModernAuction(_G, { browse = { { id = 213422, q = 40, min = 300 }, { id = 2589, q = 5, min = 120 } } })
+
+  -- Forever, the one client the recorder runs on.
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  gate.SlashCommand("clear")
+  equal("an item under the floor is not noted", gate.NoteItem(19019), false)
+  equal("and the item cache was never asked for it", #asked, 0)
+  equal("a link that is a currency's is left alone", gate.NoteItem(263015, "|Hcurrency:263015|h[Coin]|h"), false)
+  equal("something that is not a number is left alone", gate.NoteItem("263015"), false)
+  equal("no observation was written for any of them", #Items(gate), 0)
+
+  equal("a new forever item is noted the first time it is met", gate.NoteItem(263015), true)
+  local hood = Items(gate)[1]
+  equal("the observation's kind is item", hood.kind, "item")
+  equal("its subject is item", hood.subject, "item")
+  equal("its id is the item's", hood.id, 263015)
+  equal("it carries no map", hood.map, nil)
+  equal("it carries no position", hood.x, nil)
+  equal("the name is the client's", hood.payload.n, "Skyborne Scout's Hood")
+  equal("the quality number", hood.payload.ql, 3)
+  equal("the item level", hood.payload.il, 48)
+  equal("the level it requires", hood.payload.rl, 43)
+  equal("the class number", hood.payload.c, 4)
+  equal("the subclass number", hood.payload.sc, 2)
+  equal("the equip location token", hood.payload.slot, "INVTYPE_HEAD")
+  equal("a stack of one is left out", hood.payload.stack, nil)
+  equal("what a vendor pays", hood.payload.sell, 12045)
+  equal("the binding number", hood.payload.bind, 2)
+  equal("a stat by the client's own key", hood.payload.stats.ITEM_MOD_STAMINA_SHORT, 9)
+  equal("armor rides with the stats", hood.payload.stats.RESISTANCE0_NAME, 112)
+  equal("a fraction is kept to two places", hood.payload.stats.ITEM_MOD_DAMAGE_PER_SECOND_SHORT, 12.35)
+  equal("a key that is not the client's kind is left out", hood.payload.stats.lowercase_key, nil)
+  equal("a key with a space is left out", hood.payload.stats["BAD KEY"], nil)
+  equal("a stat of zero is left out", hood.payload.stats.ZERO, nil)
+  equal("an item with no use carries no spell", hood.payload.sp, nil)
+  check("the payload sits far under the reader's cap", gate.JsonBytes(hood.payload) < 600, gate.JsonBytes(hood.payload))
+  equal("the item was asked for by its bare id", asked[#asked], 263015)
+
+  equal("the same item is not noted twice", gate.NoteItem(263015), false)
+  equal("so the file still holds one", #Items(gate), 1)
+  equal("the saved file remembers the day it was noted", gate.Database().items[263015],
+    math.floor(stub.state.time / 86400))
+
+  equal("a stacking item with a use is noted too", gate.NoteItem(274048, "|Hitem:274048::::|h[Zephras Dustbloom]|h"), true)
+  local bloom = Items(gate)[2]
+  equal("its stack size is kept", bloom.payload.stack, 200)
+  equal("the spell its use triggers is kept", bloom.payload.sp, 440221)
+  equal("a required level of zero is left out", bloom.payload.rl, nil)
+  equal("an empty equip location is left out", bloom.payload.slot, nil)
+  equal("an item with no stats carries no stats table", bloom.payload.stats, nil)
+
+  equal("a name holding a client code is refused", gate.NoteItem(216483), false)
+  local before = #asked
+  equal("and is not asked for again this session", gate.NoteItem(216483), false)
+  equal("the cache was left alone", #asked, before)
+
+  -- An item the client has not loaded is tried again when it has.
+  equal("an item the client has not loaded writes nothing", gate.NoteItem(287014), false)
+  local _, waiting = gate.ItemCounts()
+  equal("it waits for another try", waiting, 1)
+  ITEM_CACHE[287014] = { name = "Emberwake Signet", quality = 2, level = 44, slot = "INVTYPE_FINGER", sell = 4410 }
+  stub.state.time = stub.state.time + 2
+  gate.NoteItem(263015)
+  equal("the next item met a second later brings it in", #Items(gate), 3)
+  equal("under its own id", Items(gate)[3].id, 287014)
+  _, waiting = gate.ItemCounts()
+  equal("and nothing is left waiting", waiting, 0)
+
+  -- An item the client never loads is given up on for the session.
+  for _ = 1, gate.ITEM_PENDING_TRIES + 2 do
+    stub.state.time = stub.state.time + 2
+    gate.NoteItem(299999)
+  end
+  _, waiting = gate.ItemCounts()
+  equal("an item that never loads stops being asked for", waiting, 0)
+
+  -- The recorders that meet items hand them over.
+  ITEM_CACHE[270099] = { name = "Magister Cowl", quality = 2, level = 45, slot = "INVTYPE_HEAD", sell = 5120 }
+  ITEM_CACHE[270098] = { name = "Dank Shoulderpads", quality = 2, level = 44, slot = "INVTYPE_SHOULDER", sell = 4980 }
+  ITEM_CACHE[279886] = { name = "Skyborne Ration", quality = 1, level = 45, stack = 20, sell = 125 }
+  ITEM_CACHE[213422] = { name = "Zephras Silk", quality = 1, level = 40, stack = 200, sell = 150 }
+  stub.state.loot = { { id = 270099, quantity = 1, source = "Creature-0-3888-0-11-2914-000136DF99" } }
+  stub.Fire("LOOT_OPENED")
+  local function Has(addon, itemId)
+    for _, observation in ipairs(Items(addon)) do
+      if observation.id == itemId then return true end
+    end
+    return false
+  end
+  check("an item in a loot window is noted", Has(gate, 270099))
+  stub.state.units.npc = { guid = "Creature-0-3888-0-11-3500-000136DF9A", name = "Vendor", level = 30 }
+  stub.state.merchant = { { id = 279886, price = 500, quantity = 5 } }
+  stub.Fire("MERCHANT_SHOW")
+  check("an item a vendor sells is noted", Has(gate, 279886))
+  stub.state.questId = 96026
+  stub.state.questTitle = "Step Two: More Rock"
+  stub.state.questRewards = { { id = 270098, name = "Dank Shoulderpads" } }
+  stub.Fire("QUEST_COMPLETE")
+  check("an item a quest rewards is noted", Has(gate, 270098))
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.state.time = stub.state.time + 61
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  check("an item in the auction house's browse list is noted", Has(gate, 213422))
+  check("an old item in the same list is not", not Has(gate, 2589))
+  equal("the auction reader sent no query for it", stub.state.auctionCalls.SendBrowseQuery, nil)
+  stub.RemoveModernAuction(_G)
+
+  -- The session cap, the fortnight and the clear.
+  local count = #Items(gate)
+  local wrote = gate.ItemCounts()
+  equal("the session counts what it wrote", wrote, count)
+  for id = 280001, 280000 + gate.ITEMS_PER_SESSION do
+    ITEM_CACHE[id] = { name = "Item " .. id, quality = 1, level = 40 }
+    gate.NoteItem(id)
+  end
+  wrote = gate.ItemCounts()
+  equal("a session writes no more than its cap", wrote, gate.ITEMS_PER_SESSION)
+  local lastId = 280000 + gate.ITEMS_PER_SESSION
+  equal("an item past the cap is not remembered as noted", gate.Database().items[lastId], nil)
+
+  gate.SlashCommand("clear")
+  equal("clear forgets which items were noted", gate.Database().items, nil)
+  equal("so an item is noted again after it", gate.NoteItem(263015), true)
+  stub.state.time = stub.state.time + (gate.ITEM_RENOTE_DAYS - 1) * 86400
+  equal("inside the fortnight a new session's memory holds", gate.Database().items[263015] ~= nil, true)
+
+  -- A new session reads the saved memory: the same file, a fresh load.
+  local savedDb = _G.EverythingWoWDB
+  local second = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  _G.EverythingWoWDB = savedDb
+  equal("a new session does not note an item the file remembers", second.NoteItem(263015), false)
+  stub.state.time = stub.state.time + 2 * 86400
+  equal("nor again later in that session", second.NoteItem(263015), false)
+  equal("an item the file does not remember is noted in it", second.NoteItem(270099), true)
+  savedDb = _G.EverythingWoWDB
+  local third = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  _G.EverythingWoWDB = savedDb
+  equal("a session past the fortnight notes it again", third.NoteItem(263015), true)
+  equal("but not an item noted inside it", third.NoteItem(270099), false)
+  savedDb = _G.EverythingWoWDB
+  local patched = LoadFreshAddon(1, { "1.60.2", "70400", "Dec 2 2026", 16001 })
+  _G.EverythingWoWDB = savedDb
+  equal("after a patch every item is noted afresh", patched.NoteItem(274048), true)
+  equal("and the memory starts over for the patch", patched.Database().itemsPatch, "1.60.2")
+
+  -- Every other client leaves items alone.
+  for _, client in ipairs({
+    { "retail", 1, { "12.1.0", "60000", "Sep 17 2026", 120100 } },
+    { "classic era", 2, { "1.15.9", "60000", "Sep 17 2026", 11509 } },
+    { "mists classic", 19, { "5.5.4", "60000", "Sep 17 2026", 50504 } },
+  }) do
+    local other = LoadFreshAddon(client[2], client[3])
+    equal(client[1] .. " notes no item", other.NoteItem(263015), false)
+    equal(client[1] .. " writes no item observation", #Items(other), 0)
+    equal(client[1] .. " keeps no item memory", other.Database().items, nil)
+  end
+
+  RemoveItemCache()
+  -- A client with no item cache functions at all writes nothing and throws nothing.
+  local bare = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  equal("forever with no item functions notes nothing", bare.NoteItem(263015), false)
+
+  stub.state.loot, stub.state.merchant, stub.state.time = savedLoot, savedMerchant, savedTime
+  stub.state.questRewards, stub.state.questId, stub.state.questTitle = savedRewards, savedQuestId, savedQuestTitle
+  stub.state.units.npc = savedNpc
+end
+
+--[[
 0.2.9: the vendor deal finder in Deals.lua. It reads the same loaded results
 as the recorder and compares each price with what a vendor pays, which the
 stand in client answers from SELL below through GetItemInfo. Nothing it
@@ -1945,7 +2169,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.2.11")
+  equal("the capture holds the addon version", capture.addon, "0.2.12")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -2313,6 +2537,16 @@ stub.state.loot = { { id = 2589, quantity = 2, source = "Creature-0-3888-0-11-29
 stub.Fire("LOOT_OPENED")
 foreverFile.RecordObjectFromGuid("GameObject-0-3888-0-11-1731-000136DF98", true)
 foreverFile.TakeSnapshot(true)
+-- 0.2.12: the Forever file carries one item observation, with its stats
+-- table, and the saved memory of the day it was noted, a table keyed by
+-- item id at the root, so the site's own parser is shown both.
+_G.GetItemInfo = function(item)
+  if item ~= 263015 then return nil end
+  return "Skyborne Scout's Hood", nil, 3, 48, 43, "Armor", "Leather", 1, "INVTYPE_HEAD", 135000, 12045, 4, 2, 2
+end
+_G.GetItemStats = function() return { ITEM_MOD_STAMINA_SHORT = 9, ITEM_MOD_AGILITY_SHORT = 14, RESISTANCE0_NAME = 112 } end
+equal("the forever file notes a new item", foreverFile.NoteItem(263015), true)
+_G.GetItemInfo, _G.GetItemStats = nil, nil
 -- The launch day read: three classic trees for each of nine classes, so the
 -- Forever file carries the size the owner's own file will.
 stub.InstallClassicTalents(_G, CLASSIC_TABS)
@@ -2331,8 +2565,10 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.11 addon version", foreverDb.addon, "0.2.11")
-check("the forever file holds what that client records", #foreverDb.observations >= 7, #foreverDb.observations)
+equal("the forever file carries the 0.2.12 addon version", foreverDb.addon, "0.2.12")
+check("the forever file holds what that client records", #foreverDb.observations >= 8, #foreverDb.observations)
+equal("the forever file's last observation is the item", foreverDb.observations[#foreverDb.observations].kind, "item")
+check("the forever file remembers the item it noted", type(foreverDb.items) == "table" and foreverDb.items[263015] ~= nil)
 local foreverAuctions = 0
 for _, observation in ipairs(foreverDb.observations) do
   if observation.kind == "auction" then foreverAuctions = foreverAuctions + 1 end
@@ -2378,7 +2614,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.11 addon version", saved.addon, "0.2.11")
+  equal("the " .. suffix .. " file carries the 0.2.12 addon version", saved.addon, "0.2.12")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)

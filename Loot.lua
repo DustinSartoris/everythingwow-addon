@@ -175,6 +175,7 @@ local function OnLootOpened()
       pcall(function() link = GetLootSlotLink(slot) end)
       local itemId = EW.IdFromLink(link)
       if itemId then
+        if EW.NoteItem then pcall(EW.NoteItem, itemId, link) end
         local quantity
         pcall(function()
           local _, _, slotQuantity = GetLootSlotInfo(slot)

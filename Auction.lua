@@ -239,6 +239,9 @@ local function Entry(itemId, quantity, unit, buyout)
   if type(itemId) ~= "number" or itemId <= 0 then return nil end
   if type(quantity) ~= "number" or quantity <= 0 then return nil end
   local entry = { id = math.floor(itemId), q = math.floor(quantity) }
+  -- From 0.2.12 an item Blizzard's item API may not hold is noted once,
+  -- by Items.lua, from the client's own item cache.
+  if EW.NoteItem then pcall(EW.NoteItem, entry.id) end
   if type(buyout) == "number" and buyout > 0 then
     entry.buyout = math.floor(buyout)
     if type(unit) ~= "number" or unit <= 0 then unit = buyout / quantity end

@@ -163,6 +163,7 @@ local function QuestItems(kind, countFunction)
         if not itemId and type(infoId) == "number" and infoId > 0 then itemId = infoId end
       end
       if type(itemId) == "number" and itemId > 0 then
+        if EW.NoteItem then pcall(EW.NoteItem, itemId) end
         local entry = { id = math.floor(itemId) }
         if type(quantity) == "number" and quantity > 1 then entry.q = math.floor(quantity) end
         -- The item's name as the window shows it, so the site can name a

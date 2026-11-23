@@ -110,6 +110,7 @@ local function RecordMerchant()
     pcall(function() link = GetMerchantItemLink(index) end)
     local itemId = IdFromLink(link)
     if itemId then
+      if EW.NoteItem then pcall(EW.NoteItem, itemId, link) end
       local price, quantity, extended = ItemInfo(index)
       local currency, amount = CurrencyFor(index)
       local entry = { id = itemId }

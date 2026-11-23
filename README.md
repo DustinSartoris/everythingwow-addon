@@ -6,6 +6,15 @@ This is version 0.2.6. It is free and open source under the MIT license.
 
 ## Changes
 
+**0.2.12** notes the items Blizzard's item API does not hold. On 23 November 2026 the site's worker asked the API by id for four items WoW Forever's own auction houses sell, and each answered 404; 295 of the 296 auction items the site had no page for were new WoW Forever items, ids above 200,000. Their names and what they are can only come from players.
+
+- **A new kind, `item`.** The first time the addon meets such an item, at the auction house, in loot, at a vendor or in a quest's rewards, it writes one observation of it from the client's own item cache: `n`, the name; `ql`, the quality number; `il`, the item level; `rl`, the level it requires; `c` and `sc`, the class and subclass numbers; `slot`, the equip location token; `stack`; `sell`, what a vendor pays in copper; `bind`; `stats`, the base item's stats by the client's own keys; and `sp`, the spell a use triggers.
+- **The same for every player.** The item is asked for by its bare id, never by the link in front of the player, so a random suffix, an enchant or a maker's name never reaches the file. Nothing of the player is in the observation and no position is written.
+- **WoW Forever alone, and once.** It runs only on WoW Forever and only for ids from 200,000 up, where the gap is. The saved file remembers the day each item was noted (`items`, beside `observations`) and notes it again only after fourteen days, after a patch or after `/ewow clear`. A session writes at most 400, so a first walk through a full auction house never pushes the NPCs, loot and quests out of the buffer.
+- **No new event and no query.** The recorders that already meet items hand them over. An item the client has not loaded yet is tried again the next few times an item is met, the way the deals window reads a sell price, and then left for another session.
+- **Before the site reads it.** The site's reader drops a kind it does not know and counts it, and reads the rest of the file as before, so this version is safe to run ahead of the site.
+- **The version and the tests.** Both tables of contents list `Items.lua` and carry `## Version: 0.2.12`. The tests note an item from each of the four places, a stacking item with a use, a name holding a client code, an item the client has not loaded, the session cap, the fortnight, a patch and a clear, and prove every other client writes nothing; the Forever file they write carries an item observation and the saved memory, which the site's own parser reads. The suite reads 806 assertions, from 726, under Lua 5.1 and 5.4.
+
 **0.2.11** records what the quest window says. On 23 November 2026 the owner asked for a quest's text, objectives and rewards: Blizzard's WoW Forever quest index holds a small part of the game's quests, and the pages the site makes from this addon's quest titles carried a name and a quest giver and nothing else.
 
 - **At the offer.** A `quest_start` observation now carries `text`, the quest's description, and `objectives`, what the player is asked to do.
@@ -170,6 +179,7 @@ The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A r
 | Your character | Once on login, after the client has loaded your gear and currencies, and on `/ewow snapshot`: your gear per slot, talents, professions, reputations, and currencies. After that, only when an hour has passed and your gear or your level has changed. |
 | Your class's talent trees | Only on `/ewow talents`: every tree and talent of your class, with each talent's place, maximum rank and prerequisite, kept apart from the observations. |
 | Auction rows | From a search you ran yourself, never from a scan of the addon's own: the addon never sends a query to Blizzard. On a client with the classic auction list, such as Classic Era and Hardcore, each row's item, quantity, and price. On Forever, and on a classic client whose auction house is `C_AuctionHouse`, from 0.2.6: each browse row's item, lowest price and total quantity, each commodity listing's unit price and quantity, and each item auction's buyout and quantity. Retail is skipped entirely, because Blizzard's own auction API is what the site reads there. |
+| New WoW Forever items | On WoW Forever only, the first time you meet an item with an id of 200,000 or more at the auction house, in loot, at a vendor or in a quest's rewards: the item's name, quality, levels, kind, slot, stack size, vendor price, binding, base stats and use spell, as the client's item cache gives them for the bare item. Once per item per fourteen days, at most 400 in a session, and with no map or position. |
 
 ## What is never recorded
 

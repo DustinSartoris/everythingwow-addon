@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.11"
+EW.ADDON_VERSION = "0.2.12"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -43,10 +43,13 @@ EW.MAX_AUCTION_BYTES = 1200000
 -- One pin sighting per subject per map per five minutes.
 EW.DEDUPE_SECONDS = 300
 
--- The kinds the reader accepts, in its own order.
+-- The kinds the reader accepts, in its own order, and item, from 0.2.12,
+-- which Items.lua writes. A reader that does not know a kind yet drops it
+-- and counts it, and reads the rest of the file as before.
 EW.KINDS = {
   "npc", "object", "quest_start", "quest_end", "objective", "loot",
   "vendor", "trainer", "flight", "auction", "rare", "character_snapshot",
+  "item",
 }
 
 local KIND_SET = {}
@@ -1203,6 +1206,7 @@ local function Clear()
   db.ignores = {}
   lastSeen = {}
   lastSeenCount = 0
+  if EW.ForgetItems then EW.ForgetItems() end
   EW.Print("Cleared. Nothing recorded before now is still held.")
 end
 
