@@ -218,6 +218,28 @@ function stub.Install(env)
 
   env.GetQuestID = function() return stub.state.questId end
   env.GetTitleText = function() return stub.state.questTitle end
+  -- The quest window's own texts and rewards, for the quest recorder from
+  -- 0.2.11. Every one is nil or empty unless a test sets it.
+  env.GetQuestText = function() return stub.state.questText end
+  env.GetObjectiveText = function() return stub.state.questObjectives end
+  env.GetRewardText = function() return stub.state.questCompletion end
+  local function questItems(kind)
+    return (kind == "choice" and stub.state.questChoices or stub.state.questRewards) or {}
+  end
+  env.GetNumQuestRewards = function() return #(stub.state.questRewards or {}) end
+  env.GetNumQuestChoices = function() return #(stub.state.questChoices or {}) end
+  env.GetQuestItemLink = function(kind, index)
+    local row = questItems(kind)[index]
+    if not row or row.noLink then return nil end
+    return "|cffffffff|Hitem:" .. row.id .. "::::::::80:::::|h[Reward]|h|r"
+  end
+  env.GetQuestItemInfo = function(kind, index)
+    local row = questItems(kind)[index]
+    if not row then return nil end
+    return "Reward", nil, row.q or 1, 1, true, row.id
+  end
+  env.GetRewardMoney = function() return stub.state.questMoney or 0 end
+  env.GetRewardXP = function() return stub.state.questXp or 0 end
 
   env.GetMerchantNumItems = function() return #stub.state.merchant end
   -- Retail has C_MerchantFrame.GetItemInfo and no GetMerchantItemInfo global;

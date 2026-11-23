@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.10")
+equal("addon is the addon version", saved.addon, "0.2.11")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -205,6 +205,110 @@ equal("quest start id is the quest id", questStart.id, 62)
 equal("quest start names the giver", questStart.payload.npc_id, 1234)
 stub.Fire("QUEST_COMPLETE")
 equal("quest end kind", last().kind, "quest_end")
+
+-- 0.2.11: what the quest window says, with the player scrubbed out of it.
+clear()
+stub.state.questId = 2865
+stub.state.questTitle = "Scarab Shells"
+stub.state.questText = "Thalos, my cousin in Booty Bay needs shells.\r\n\r\nBring them to me, |cffffd200Thalos|r!"
+stub.state.questObjectives = "Bring 5 Uncracked Scarab Shells to Tran'rek in Gadgetzan."
+stub.state.questCompletion = "Oh, great! You got them!\n\nThanks, Thalos. You're a real lifesaver!"
+stub.state.questRewards = { { id = 9527 }, { id = 4306, q = 5 } }
+stub.state.questChoices = { { id = 9531 }, { id = 270098, noLink = true } }
+stub.state.questMoney = 8500
+stub.state.questXp = 2650
+_G.C_QuestLog = { GetQuestDifficultyLevel = function(questId) return questId == 2865 and 45 or 0 end }
+stub.Fire("QUEST_DETAIL")
+local offered = last()
+equal("the offer keeps its title", offered.payload.title, "Scarab Shells")
+equal("the offer records the quest's text with the player's name scrubbed and its color codes gone",
+  offered.payload.text, "<name>, my cousin in Booty Bay needs shells.\n\nBring them to me, <name>!")
+equal("the offer records the objectives", offered.payload.objectives,
+  "Bring 5 Uncracked Scarab Shells to Tran'rek in Gadgetzan.")
+equal("the offer carries no completion text", offered.payload.completion, nil)
+equal("the offer lists the rewards", #offered.payload.rewards, 2)
+equal("a reward's id is read from its link", offered.payload.rewards[1].id, 9527)
+equal("a reward of one writes no quantity", offered.payload.rewards[1].q, nil)
+equal("a reward of several writes how many", offered.payload.rewards[2].q, 5)
+equal("the offer lists the choices", #offered.payload.choices, 2)
+equal("a choice with no link is read from its item info", offered.payload.choices[2].id, 270098)
+equal("the offer records the money in copper", offered.payload.money, 8500)
+equal("the offer records the experience", offered.payload.xp, 2650)
+equal("the offer records the quest's level", offered.payload.level, 45)
+equal("the offer is not marked cut", offered.payload.cut, nil)
+stub.Fire("QUEST_COMPLETE")
+local handedIn = last()
+equal("the turn in records what the NPC says, scrubbed", handedIn.payload.completion,
+  "Oh, great! You got them!\n\nThanks, <name>. You're a real lifesaver!")
+equal("the turn in carries no offer text", handedIn.payload.text, nil)
+equal("the turn in lists the rewards too", #handedIn.payload.rewards, 2)
+for _, observation in ipairs(observations()) do
+  for _, field in ipairs({ "text", "objectives", "completion" }) do
+    local value = observation.payload and observation.payload[field]
+    check("no recorded quest text holds the player's name", value == nil or value:find("Thalos", 1, true) == nil, value)
+  end
+end
+
+-- A name of two words is scrubbed whole and word by word.
+do
+  local held = stub.state.units.player
+  stub.state.units.player = { guid = held.guid, name = "Aldric Stonehand", level = 80, isPlayer = true }
+  equal("a surname alone is scrubbed", EW.QuestText("Stonehand, is it? Aldric Stonehand and Aldric.", 500),
+    "<name>, is it? <name> and <name>.")
+  equal("a longer word that only starts with the name is left alone", EW.QuestText("Aldrics are common here.", 500),
+    "Aldrics are common here.")
+  stub.state.units.player = held
+end
+
+-- What is refused, and what is cut.
+equal("a text holding a link is refused whole", EW.QuestText("Take this |Hitem:1::|h[Thing]|h to him.", 500), nil)
+equal("a text holding a control character is refused whole", EW.QuestText("Take\tthis.", 500), nil)
+equal("an empty text is nothing", EW.QuestText("  \r\n ", 500), nil)
+equal("a value that is not text is nothing", EW.QuestText(42, 500), nil)
+equal("three blank lines become one", EW.QuestText("One.\n\n\n\nTwo.", 500), "One.\n\nTwo.")
+equal("a long text is cut to its length", #EW.QuestText(string.rep("word ", 1000), 1600) <= 1600, true)
+equal("a cut never splits a character", EW.CutBytes("\195\169\195\169\195\169", 3), "\195\169")
+equal("a cut at a boundary keeps the whole characters", EW.CutBytes("\195\169\195\169\195\169", 4), "\195\169\195\169")
+equal("a short text is not cut", EW.CutBytes("short", 100), "short")
+
+-- A quest whose text swells in JSON is shortened to fit, never dropped.
+clear()
+stub.state.questId = 2866
+stub.state.questTitle = "A Quest of Many Quotes"
+stub.state.questText = string.rep('"', 1600)
+stub.state.questObjectives = string.rep('"', 600)
+stub.Fire("QUEST_DETAIL")
+local swollen = last()
+equal("the swollen quest is still recorded", swollen.id, 2866)
+check("its payload fits the reader's cap", EW.JsonBytes(swollen.payload) <= EW.PAYLOAD_CAP, EW.JsonBytes(swollen.payload))
+equal("and says it was cut", swollen.payload.cut, true)
+check("and still holds text", type(swollen.payload.text) == "string" and #swollen.payload.text > 0)
+equal("and was not replaced by the trim marker", swollen.payload.trimmed, nil)
+
+-- A client with none of the quest window functions records as before.
+clear()
+do
+  local held = {}
+  for _, name in ipairs({ "GetQuestText", "GetObjectiveText", "GetRewardText", "GetNumQuestRewards",
+    "GetNumQuestChoices", "GetQuestItemLink", "GetQuestItemInfo", "GetRewardMoney", "GetRewardXP" }) do
+    held[name] = _G[name]
+    _G[name] = nil
+  end
+  _G.C_QuestLog = nil
+  stub.state.questId = 2867
+  stub.state.questTitle = "A Plain Quest"
+  stub.Fire("QUEST_DETAIL")
+  local plain = last()
+  equal("a client without the functions still records the quest", plain.id, 2867)
+  equal("with its title", plain.payload.title, "A Plain Quest")
+  equal("and no text", plain.payload.text, nil)
+  equal("and no rewards", plain.payload.rewards, nil)
+  equal("and raises nothing", EW.lastError, nil)
+  for name, value in pairs(held) do _G[name] = value end
+end
+stub.state.questText, stub.state.questObjectives, stub.state.questCompletion = nil, nil, nil
+stub.state.questRewards, stub.state.questChoices, stub.state.questMoney, stub.state.questXp = nil, nil, nil, nil
+_G.C_QuestLog = nil
 
 -- The vendor recorder.
 clear()
@@ -886,7 +990,7 @@ do
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
   check("status prints the 0.2.7 addon version",
-    text:find("version 0.2.10", 1, true) ~= nil, text)
+    text:find("version 0.2.11", 1, true) ~= nil, text)
 end
 
 --[[
@@ -1834,7 +1938,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.2.10")
+  equal("the capture holds the addon version", capture.addon, "0.2.11")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -2185,7 +2289,18 @@ stub.state.units.nameplate1 = {
   level = 3, reaction = 2, classification = "normal",
 }
 stub.Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+-- 0.2.11: the Forever file carries a quest with its text, line breaks, an
+-- apostrophe, a quotation mark and the name token, so the site's own parser
+-- is shown everything the quest recorder can write.
+stub.state.questText = "Thalos, they say \"the shells are worth a fortune\".\r\n\r\nDon't believe it, Thalos."
+stub.state.questObjectives = "Bring 5 Uncracked Scarab Shells to Tran'rek in Gadgetzan."
+stub.state.questRewards = { { id = 9527 }, { id = 4306, q = 5 } }
+stub.state.questChoices = { { id = 9531 } }
+stub.state.questMoney = 8500
+stub.state.questXp = 2650
 stub.Fire("QUEST_DETAIL")
+stub.state.questText, stub.state.questObjectives = nil, nil
+stub.state.questRewards, stub.state.questChoices, stub.state.questMoney, stub.state.questXp = nil, nil, nil, nil
 stub.Fire("MERCHANT_SHOW")
 stub.state.loot = { { id = 2589, quantity = 2, source = "Creature-0-3888-0-11-2914-000136DF96" } }
 stub.Fire("LOOT_OPENED")
@@ -2209,7 +2324,7 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.10 addon version", foreverDb.addon, "0.2.10")
+equal("the forever file carries the 0.2.11 addon version", foreverDb.addon, "0.2.11")
 check("the forever file holds what that client records", #foreverDb.observations >= 7, #foreverDb.observations)
 local foreverAuctions = 0
 for _, observation in ipairs(foreverDb.observations) do
@@ -2256,7 +2371,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.10 addon version", saved.addon, "0.2.10")
+  equal("the " .. suffix .. " file carries the 0.2.11 addon version", saved.addon, "0.2.11")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)
