@@ -313,7 +313,7 @@ function stub.Install(env)
     local row = stub.state.auction[index]
     if not row then return nil end
     return "Item", nil, row.count, nil, nil, nil, nil, nil, nil, row.buyout, nil, nil, nil,
-      "SomeSeller", nil, nil, row.id, true
+      row.owner or "SomeSeller", nil, nil, row.id, true
   end
 
   env.InCombatLockdown = function() return stub.state.combat == true end
@@ -468,6 +468,10 @@ modern auction reader from 0.2.6. No client stub carries C_AuctionHouse by
 default, so the classic scan's tests read a client without it, exactly as
 the suite always has; a test installs this shape and removes it again.
 
+A commodity row's own counts how many of its quantity are the player's own,
+an item row's mine marks the player's own auction and its link is the
+auction's item link, for the deal finder from 0.2.9.
+
 spec.browse lists browse rows, each an item id, a total quantity, a lowest
 price and an optional battle pet species. spec.commodities maps an item id
 to its listings, each a quantity and a unit price. spec.items maps an item
@@ -505,7 +509,7 @@ function stub.InstallModernAuction(env, spec)
       return {
         itemID = itemId, quantity = row.q, unitPrice = row.unit, auctionID = 1000 + index,
         owners = { "SomeSeller" }, totalNumberOfOwners = 1, timeLeftSeconds = 3600,
-        numOwnerItems = 0, containsOwnerItem = false, containsAccountItem = false,
+        numOwnerItems = row.own or 0, containsOwnerItem = (row.own or 0) > 0, containsAccountItem = false,
       }
     end,
     GetNumItemSearchResults = function(itemKey)
@@ -519,8 +523,8 @@ function stub.InstallModernAuction(env, spec)
       return {
         itemKey = itemKey, owners = { "SomeSeller" }, totalNumberOfOwners = 1, timeLeft = 2,
         auctionID = 2000 + index, quantity = row.q, buyoutAmount = row.buyout,
-        bidder = "Player-3888-0A1B2C3D", minBid = 1,
-        containsOwnerItem = false, containsAccountItem = false, containsSocketedItem = false,
+        bidder = "Player-3888-0A1B2C3D", minBid = 1, itemLink = row.link,
+        containsOwnerItem = row.mine == true, containsAccountItem = false, containsSocketedItem = false,
       }
     end,
     SendBrowseQuery = function() count("SendBrowseQuery") end,

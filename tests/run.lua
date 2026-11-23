@@ -44,7 +44,7 @@ end
 
 stub.Install(_G)
 
-local FILES = { "Core", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Talents", "Auction" }
+local FILES = { "Core", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Talents", "Auction", "Deals" }
 
 --[[ Loads every addon file fresh into a new table, the way the game loads
      them once at login: EW.Client and EW.Caps are computed as Core.lua
@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.8")
+equal("addon is the addon version", saved.addon, "0.2.9")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -886,7 +886,7 @@ do
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
   check("status prints the 0.2.7 addon version",
-    text:find("version 0.2.8", 1, true) ~= nil, text)
+    text:find("version 0.2.9", 1, true) ~= nil, text)
 end
 
 --[[
@@ -1382,6 +1382,322 @@ do
 end
 
 --[[
+0.2.9: the vendor deal finder in Deals.lua. It reads the same loaded results
+as the recorder and compares each price with what a vendor pays, which the
+stand in client answers from SELL below through GetItemInfo. Nothing it
+finds is written to the saved file. The window is built against a stand in
+frame that accepts any call, installed for these tests alone; without it the
+window cannot be built, which is the path that prints the list in chat.
+]]
+local SELL = {}
+local function InstallItemInfo()
+  _G.GetItemInfo = function(item)
+    local id = type(item) == "number" and item or tonumber(tostring(item):match("item:(%d+)"))
+    local row = id and SELL[id] or nil
+    if not row then return nil end
+    return row.name, "|cffffffff|Hitem:" .. id .. "::::::::80:::::|h[" .. row.name .. "]|h|r", 1,
+      nil, nil, nil, nil, nil, nil, nil, row.sell
+  end
+end
+local function RemoveItemInfo() _G.GetItemInfo = nil end
+
+local function Plain(text)
+  return (tostring(text):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h", ""):gsub("|h", ""))
+end
+
+--[[ A frame that accepts any method, keeps the text it is given and whether
+     it is shown, and hands out more of itself for font strings and textures. ]]
+local function MockFrame()
+  local mock = { shown = true, scripts = {} }
+  return setmetatable(mock, { __index = function(_, key)
+    if type(key) ~= "string" or not key:match("^%u") then return nil end
+    if key == "SetText" then return function(self, text) self.text = text end end
+    if key == "Show" then return function(self) self.shown = true end end
+    if key == "Hide" then return function(self) self.shown = false end end
+    if key == "IsShown" then return function(self) return self.shown end end
+    if key == "SetScript" then return function(self, which, handler) self.scripts[which] = handler end end
+    if key == "CreateFontString" or key == "CreateTexture" then return function() return MockFrame() end end
+    return function() end
+  end })
+end
+local realCreateFrame
+local function InstallWindowFrames()
+  realCreateFrame = _G.CreateFrame
+  _G.CreateFrame = function(kind, name, ...)
+    if name == "EverythingWoWDealsFrame" or kind == "Button" then return MockFrame() end
+    return realCreateFrame(kind, name, ...)
+  end
+end
+local function RemoveWindowFrames()
+  if realCreateFrame then _G.CreateFrame = realCreateFrame end
+  realCreateFrame = nil
+end
+
+local function DealFor(addon, itemId)
+  for _, deal in ipairs(addon.DealList()) do
+    if deal.id == itemId then return deal end
+  end
+  return nil
+end
+
+equal("money reads as gold, silver and copper", Plain(EW.Money(123456)), "12g 34s 56c")
+equal("money under a silver reads as copper alone", Plain(EW.Money(7)), "7c")
+equal("money of a whole gold keeps its zeros", Plain(EW.Money(10000)), "1g 0s 0c")
+equal("money that is not a number reads as unknown", EW.Money(nil), "?")
+
+local DEAL_SPEC = {
+  browse = {
+    { id = 2589, q = 400, min = 120 },
+    { id = 2592, q = 35, min = 410 },
+    { id = 4306, q = 9, min = 90 },
+    { id = 82800, q = 1, min = 990000, pet = 39 },
+  },
+  commodities = {
+    -- Twenty at 120 and five at 124 are under the vendor's 125; three of
+    -- the five are the player's own, so two of them are theirs to buy.
+    [2589] = { { q = 20, unit = 120 }, { q = 5, unit = 124, own = 3 }, { q = 5, unit = 125 }, { q = 200, unit = 131 } },
+  },
+  items = {
+    [19019] = {
+      { q = 1, buyout = 25000000 }, { q = 1 }, { q = 1, buyout = 26000000, mine = true },
+      { q = 1, buyout = 31000000 },
+    },
+  },
+}
+
+-- Forever, on the mainline project id, with the window buildable.
+do
+  _G.GameTooltip.OnShow = nil
+  SELL = {
+    [2589] = { name = "Linen Cloth", sell = 125 },
+    [2592] = { name = "Wool Cloth", sell = 400 },
+    [4306] = { name = "Silk Cloth", sell = 0 },
+    [19019] = { name = "Thunderfury", sell = 30000000 },
+  }
+  InstallItemInfo()
+  InstallWindowFrames()
+  stub.InstallModernAuction(_G, DEAL_SPEC)
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  gate.SlashCommand("clear")
+  equal("forever's deal finder reads the modern auction house", gate.DealsMode(), "modern")
+
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("no deal is read before the auction house first opens", gate.DealCount(), 0)
+
+  stub.state.combat = true
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("opening the auction house in combat registers no deal reader", gate.dealsModernEvents, nil)
+  stub.state.combat = false
+
+  stub.state.printed = {}
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("the deal finder registers the six result events", gate.dealsModernEvents, 6)
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("the browse list finds the one item under its vendor price", gate.DealCount(), 1)
+  local linen = DealFor(gate, 2589)
+  check("the deal is the linen cloth", linen ~= nil)
+  equal("a browse row is not exact", linen.exact, false)
+  equal("a browse row is the price of one", linen.count, 1)
+  equal("a browse row keeps the lowest price", linen.low, 120)
+  equal("a browse row's profit is the vendor price less the lowest price", linen.profit, 5)
+  equal("an item priced over its vendor price is no deal", DealFor(gate, 2592), nil)
+  equal("an item no vendor buys is never a deal", DealFor(gate, 4306), nil)
+  equal("a battle pet's row is passed over", DealFor(gate, 82800), nil)
+  equal("a browse row reads as one or more", Plain(gate.DealLine(linen)),
+    "[Linen Cloth]: from 1s 20c each, vendor 1s 25c each, profit 5c or more")
+
+  check("the window opened by itself for the first deal", gate.dealsWindow ~= nil and gate.dealsWindow:IsShown())
+  equal("the window's first row names the item", Plain(gate.dealsWindow.rows[1].name.text), "[Linen Cloth]")
+  equal("the window's first row says what one costs", Plain(gate.dealsWindow.rows[1].buy.text), "1+ from 1s 20c each")
+  equal("the window's second row is hidden", gate.dealsWindow.rows[2]:IsShown(), false)
+  equal("the window prints nothing in chat", #stub.state.printed, 0)
+
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  linen = DealFor(gate, 2589)
+  equal("a commodity search makes the row exact", linen.exact, true)
+  equal("it counts every unit under the vendor price but the player's own", linen.count, 22)
+  equal("it adds up what they cost", linen.cost, 20 * 120 + 2 * 124)
+  equal("it adds up what a vendor pays", linen.value, 22 * 125)
+  equal("its profit is the difference", linen.profit, 22 * 125 - (20 * 120 + 2 * 124))
+  equal("an exact row reads as what to buy", Plain(gate.DealLine(linen)),
+    "[Linen Cloth]: buy 22 for 26s 48c, vendor 27s 50c, profit 1s 2c")
+  equal("the open window follows the search", Plain(gate.dealsWindow.rows[1].buy.text), "Buy 22 for 26s 48c")
+  equal("and shows the profit", Plain(gate.dealsWindow.rows[1].profit.text), "+1s 2c")
+
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("going back to the list keeps the exact row", DealFor(gate, 2589).exact, true)
+
+  stub.Fire("ITEM_SEARCH_RESULTS_UPDATED", { itemID = 19019, itemLevel = 80, itemSuffix = 0, battlePetSpeciesID = 0 })
+  local sword = DealFor(gate, 19019)
+  check("an item search finds the auction under its vendor price", sword ~= nil)
+  equal("it leaves out the auction with no buyout, the player's own and the dear one", sword.count, 1)
+  equal("it costs the auction's buyout", sword.cost, 25000000)
+  equal("its profit is the vendor price less the buyout", sword.profit, 5000000)
+  equal("the list puts the most profit first", gate.DealList()[1].id, 19019)
+  equal("the window's first row is now the sword", Plain(gate.dealsWindow.rows[1].name.text), "[Thunderfury]")
+
+  equal("the deal finder sent no browse query", stub.state.auctionCalls.SendBrowseQuery, nil)
+  equal("the deal finder sent no search query", stub.state.auctionCalls.SendSearchQuery, nil)
+  equal("the deal finder sent no sell search query", stub.state.auctionCalls.SendSellSearchQuery, nil)
+
+  local saved = gate.Database()
+  for _, observation in ipairs(saved.observations) do
+    check("only the recorder's own kinds reach the saved file", observation.kind == "auction", observation.kind)
+  end
+  check("the saved file never names a deal", not Mentions(saved, "deal") and not Mentions(saved, "profit"))
+
+  -- The market moves: the cheap linen is bought out and the search says so.
+  DEAL_SPEC.commodities[2589] = { { q = 5, unit = 125 }, { q = 200, unit = 131 } }
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("a search with nothing under the vendor price drops the row", DealFor(gate, 2589), nil)
+  DEAL_SPEC.commodities[2589] = { { q = 20, unit = 120 }, { q = 5, unit = 124, own = 3 }, { q = 5, unit = 125 }, { q = 200, unit = 131 } }
+
+  stub.state.combat = true
+  equal("nothing is read in combat", gate.OnDealCommodityResults(2589), 0)
+  stub.state.combat = false
+
+  -- The slash command.
+  gate.SlashCommand("deals")
+  equal("/ewow deals closes the open window", gate.dealsWindow:IsShown(), false)
+  gate.SlashCommand("deals")
+  equal("/ewow deals opens it again", gate.dealsWindow:IsShown(), true)
+  stub.state.printed = {}
+  gate.SlashCommand("deals list")
+  local listed = Plain(table.concat(stub.state.printed, "\n"))
+  check("/ewow deals list prints the deals", listed:find("1 item under vendor price:", 1, true) ~= nil
+    and listed:find("[Thunderfury]: buy 1 for 2500g 0s 0c, vendor 3000g 0s 0c, profit 500g 0s 0c", 1, true) ~= nil, listed)
+  gate.SlashCommand("deals clear")
+  equal("/ewow deals clear empties the list", gate.DealCount(), 0)
+  stub.state.printed = {}
+  gate.SlashCommand("help")
+  check("the command list names /ewow deals", table.concat(stub.state.printed, "\n"):find("/ewow deals", 1, true) ~= nil)
+
+  -- A new visit starts a new list, and with auto off it says so in chat once.
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("the list fills again", gate.DealCount(), 1)
+  gate.SlashCommand("deals auto off")
+  equal("auto can be turned off", gate.DealsAutoOpen(), false)
+  gate.dealsWindow:Hide()
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  equal("opening the auction house again clears the list", gate.DealCount(), 0)
+  stub.state.printed = {}
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("with auto off the window stays closed", gate.dealsWindow:IsShown(), false)
+  equal("and one line of chat says a deal was found", #stub.state.printed, 1)
+  check("naming the command", Plain(stub.state.printed[1]):find("1 item is listed under vendor price. Type /ewow deals to see them.", 1, true) ~= nil,
+    stub.state.printed[1])
+
+  -- An item the client has not loaded has no sell price yet, and is asked again.
+  gate.SlashCommand("deals auto on")
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  local held = SELL[2589]
+  SELL[2589] = nil
+  stub.state.timers = {}
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("an item not loaded yet is no deal", gate.DealCount(), 0)
+  check("and a retry is queued", #stub.state.timers == 1)
+  SELL[2589] = held
+  stub.RunTimers(5)
+  equal("once the client has loaded it the deal appears", gate.DealCount(), 1)
+  equal("and nothing was raised along the way", gate.lastError, nil)
+
+  stub.RemoveModernAuction(_G)
+  RemoveWindowFrames()
+  RemoveItemInfo()
+end
+
+-- Forever again, on a client where the window cannot be built: the list
+-- goes to chat instead, and nothing is raised.
+do
+  _G.GameTooltip.OnShow = nil
+  InstallItemInfo()
+  stub.InstallModernAuction(_G, DEAL_SPEC)
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.state.printed = {}
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("a window that cannot be built leaves none", gate.dealsWindow, nil)
+  local printed = Plain(table.concat(stub.state.printed, "\n"))
+  check("and the deal is printed in chat instead", printed:find("[Linen Cloth]: from 1s 20c each", 1, true) ~= nil, printed)
+  stub.state.printed = {}
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("but only once in a visit", #stub.state.printed, 0)
+  equal("and nothing is raised", gate.lastError, nil)
+  stub.RemoveModernAuction(_G)
+  RemoveItemInfo()
+end
+
+-- Forever with no sell prices at all, as before 0.2.9's stand in existed:
+-- the finder holds nothing, prints nothing and asks for nothing.
+do
+  _G.GameTooltip.OnShow = nil
+  stub.InstallModernAuction(_G, DEAL_SPEC)
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.state.printed = {}
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  equal("a client that gives no item info finds no deal", gate.DealCount(), 0)
+  equal("and prints nothing", #stub.state.printed, 0)
+  stub.RemoveModernAuction(_G)
+end
+
+-- Retail: the addon does not read its auction house, and neither does the finder.
+do
+  _G.GameTooltip.OnShow = nil
+  InstallItemInfo()
+  stub.InstallModernAuction(_G, DEAL_SPEC)
+  local gate = LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+  equal("retail's deal finder is idle", gate.DealsMode(), "idle")
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+  stub.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+  equal("retail registers no deal reader", gate.dealsModernEvents, nil)
+  equal("retail finds no deal", gate.DealCount(), 0)
+  equal("retail's finder asks the client for nothing", next(stub.state.auctionCalls), nil)
+  stub.RemoveModernAuction(_G)
+  RemoveItemInfo()
+end
+
+-- Classic Era, without C_AuctionHouse: one page of the list.
+do
+  _G.GameTooltip.OnShow = nil
+  InstallItemInfo()
+  InstallWindowFrames()
+  local gate = LoadFreshAddon(2, { "1.15.9", "50000", "Sep 17 2026", 11509 })
+  equal("classic era's deal finder reads the classic list", gate.DealsMode(), "classic")
+  local heldAuction, heldPlayer = stub.state.auction, stub.state.units.player
+  stub.state.units.player = { guid = "Player-3888-0A1B2C3E", name = "Thalos", level = 60, isPlayer = true }
+  stub.state.auction = {
+    { id = 2589, count = 20, buyout = 2000 },
+    { id = 2589, count = 10, buyout = 1300 },
+    { id = 2589, count = 5, buyout = 500, owner = "Thalos" },
+    { id = 2589, count = 3 },
+    { id = 2592, count = 2, buyout = 900 },
+  }
+  stub.Fire("AUCTION_HOUSE_SHOW")
+  stub.Fire("AUCTION_ITEM_LIST_UPDATE")
+  local linen = DealFor(gate, 2589)
+  check("the classic page finds the stack under its vendor price", linen ~= nil)
+  equal("it counts the one stack that is a deal", linen.count, 20)
+  equal("it costs that stack's buyout", linen.cost, 2000)
+  equal("its profit is what a vendor pays less the buyout", linen.profit, 20 * 125 - 2000)
+  equal("a classic row is exact", linen.exact, true)
+  equal("the dear stack is no deal", DealFor(gate, 2592), nil)
+  equal("the page is read once however often it is announced", (function()
+    stub.Fire("AUCTION_ITEM_LIST_UPDATE")
+    return DealFor(gate, 2589).count
+  end)(), 20)
+  stub.state.auction = { { id = 2592, count = 2, buyout = 900 } }
+  stub.Fire("AUCTION_ITEM_LIST_UPDATE")
+  check("a deal on an earlier page is kept while another page is read", DealFor(gate, 2589) ~= nil)
+  stub.state.auction, stub.state.units.player = heldAuction, heldPlayer
+  equal("and nothing was raised", gate.lastError, nil)
+  RemoveWindowFrames()
+  RemoveItemInfo()
+end
+
+--[[
 0.2.6: `/ewow talents`, the talent tree recorder in Talents.lua. Each shape
 is installed on the stand in client only for its own test and removed after,
 so nothing above or below this block reads a client with talent functions.
@@ -1469,7 +1785,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.2.8")
+  equal("the capture holds the addon version", capture.addon, "0.2.9")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -1844,7 +2160,7 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.8 addon version", foreverDb.addon, "0.2.8")
+equal("the forever file carries the 0.2.9 addon version", foreverDb.addon, "0.2.9")
 check("the forever file holds what that client records", #foreverDb.observations >= 7, #foreverDb.observations)
 local foreverAuctions = 0
 for _, observation in ipairs(foreverDb.observations) do
@@ -1891,7 +2207,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.8 addon version", saved.addon, "0.2.8")
+  equal("the " .. suffix .. " file carries the 0.2.9 addon version", saved.addon, "0.2.9")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)
