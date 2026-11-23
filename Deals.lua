@@ -25,7 +25,9 @@ How exact a row is depends on what the client has loaded:
 
   A commodity search or an item search gives every listing, so the row is
   exact: how many to buy, what they cost together, what a vendor pays for
-  them and the profit.
+  them and the profit. Both give the price of one and how many there are at
+  that price; 0.2.9 took an item row's price for the whole row, which made
+  a row of 15 at 8 silver 67 each read as 15 for 8 silver 67.
 
   The browse list gives only the lowest price of each item, so the row is
   the price of one, marked "1+": open the item in the auction house and its
@@ -71,6 +73,9 @@ local pendingCount = 0
 local retriesLeft = 0
 local retryQueued = false
 local autoOpen = true
+-- A deal of less profit than this, in copper, is held but not shown or
+-- counted. Set with `/ewow deals min`, for the session; 0 shows every deal.
+local minProfit = 0
 local shownThisVisit = false
 local announcedThisVisit = false
 
@@ -218,7 +223,9 @@ end
 --[[ The deals held, the most profit first, then by name. ]]
 function EW.DealList()
   local list = {}
-  for _, deal in pairs(deals) do list[#list + 1] = deal end
+  for _, deal in pairs(deals) do
+    if deal.profit >= minProfit then list[#list + 1] = deal end
+  end
   table.sort(list, function(a, b)
     if a.profit ~= b.profit then return a.profit > b.profit end
     if a.name ~= b.name then return a.name < b.name end
@@ -229,9 +236,27 @@ end
 
 function EW.DealCount()
   local count = 0
-  for _ in pairs(deals) do count = count + 1 end
+  for _, deal in pairs(deals) do
+    if deal.profit >= minProfit then count = count + 1 end
+  end
   return count
 end
+
+--[[ An amount of money as the player types it: "50s", "1g", "1g 20s", "75c",
+     or a bare number of copper. Nil for anything else. ]]
+function EW.ParseMoney(text)
+  text = string.lower(tostring(text or ""))
+  if text:match("^%s*%d+%s*$") then return tonumber(text:match("%d+")) end
+  local total, found = 0, false
+  for amount, unit in text:gmatch("(%d+)%s*([gsc])") do
+    found = true
+    total = total + tonumber(amount) * (unit == "g" and 10000 or unit == "s" and 100 or 1)
+  end
+  if not found or text:gsub("%d+%s*[gsc]", ""):match("%S") then return nil end
+  return total
+end
+
+function EW.DealsMinProfit() return minProfit end
 
 function EW.ClearDeals()
   deals = {}
@@ -411,9 +436,11 @@ local function ReadItem(itemKey)
       if info.containsOwnerItem == true then return end
       local quantity = type(info.quantity) == "number" and info.quantity or 1
       if type(info.buyoutAmount) ~= "number" or info.buyoutAmount <= 0 or quantity <= 0 then return end
+      -- The client groups identical auctions into one row: buyoutAmount is
+      -- the price of one, and quantity is how many there are at that price.
       rows[#rows + 1] = {
         q = quantity,
-        buyout = info.buyoutAmount,
+        unit = info.buyoutAmount,
         link = type(info.itemLink) == "string" and info.itemLink or nil,
       }
     end)
@@ -763,7 +790,7 @@ AfterRead = function(fromRead)
   end
 end
 
---[[ `/ewow deals`, with `list`, `clear`, and `auto on|off`. ]]
+--[[ `/ewow deals`, with `list`, `clear`, `min <amount>` and `auto on|off`. ]]
 function EW.DealsCommand(rest)
   local word = string.lower(string.match(tostring(rest or ""), "^%s*(%S*)") or "")
   local argument = string.lower(string.match(tostring(rest or ""), "^%s*%S*%s*(%S*)") or "")
@@ -773,6 +800,16 @@ function EW.DealsCommand(rest)
     EW.ClearDeals()
     pcall(RefreshWindow)
     EW.Print("The list of auctions under vendor price is cleared.")
+  elseif word == "min" then
+    local amount = EW.ParseMoney(string.match(tostring(rest or ""), "^%s*%S*%s*(.-)%s*$"))
+    if amount == nil then
+      EW.Print("Use /ewow deals min with an amount, such as /ewow deals min 50s or /ewow deals min 1g. /ewow deals min 0 shows every deal.")
+    else
+      minProfit = amount
+      pcall(RefreshWindow)
+      EW.Print(amount > 0 and string.format("Only deals with a profit of %s or more are shown. This lasts until you log out or reload.", EW.Money(amount))
+        or "Every deal is shown, whatever its profit.")
+    end
   elseif word == "auto" then
     if argument == "on" or argument == "off" then
       autoOpen = (argument == "on")

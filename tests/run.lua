@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.9")
+equal("addon is the addon version", saved.addon, "0.2.10")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -886,7 +886,7 @@ do
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
   check("status prints the 0.2.7 addon version",
-    text:find("version 0.2.9", 1, true) ~= nil, text)
+    text:find("version 0.2.10", 1, true) ~= nil, text)
 end
 
 --[[
@@ -1462,6 +1462,12 @@ local DEAL_SPEC = {
       { q = 1, buyout = 25000000 }, { q = 1 }, { q = 1, buyout = 26000000, mine = true },
       { q = 1, buyout = 31000000 },
     },
+    -- The owner's own screen of 23 November 2026: the client groups
+    -- identical auctions into one row, and its buyout is the price of one.
+    [856] = {
+      { q = 15, buyout = 867 }, { q = 10, buyout = 869 }, { q = 1, buyout = 875 },
+      { q = 5, buyout = 880 }, { q = 2, buyout = 1000 },
+    },
   },
 }
 
@@ -1473,6 +1479,7 @@ do
     [2592] = { name = "Wool Cloth", sell = 400 },
     [4306] = { name = "Silk Cloth", sell = 0 },
     [19019] = { name = "Thunderfury", sell = 30000000 },
+    [856] = { name = "Blue Leather Bag", sell = 875 },
   }
   InstallItemInfo()
   InstallWindowFrames()
@@ -1536,6 +1543,48 @@ do
   equal("the list puts the most profit first", gate.DealList()[1].id, 19019)
   equal("the window's first row is now the sword", Plain(gate.dealsWindow.rows[1].name.text), "[Thunderfury]")
 
+  -- 0.2.10: a row of many at one price is the price of one, times how many.
+  stub.Fire("ITEM_SEARCH_RESULTS_UPDATED", { itemID = 856, itemLevel = 15, itemSuffix = 0, battlePetSpeciesID = 0 })
+  local bag = DealFor(gate, 856)
+  check("a grouped item row under its vendor price is a deal", bag ~= nil)
+  equal("it counts only the rows priced under the vendor price", bag.count, 25)
+  equal("it costs the price of one times how many, row by row", bag.cost, 15 * 867 + 10 * 869)
+  equal("a vendor pays for each of them", bag.value, 25 * 875)
+  equal("its profit is the small difference, not the whole price", bag.profit, 25 * 875 - (15 * 867 + 10 * 869))
+  equal("the row reads as it would in the auction house", Plain(gate.DealLine(bag)),
+    "[Blue Leather Bag]: buy 25 for 2g 16s 95c, vendor 2g 18s 75c, profit 1s 80c")
+  local bagRows = {}
+  for _, observation in ipairs(gate.Database().observations) do
+    if observation.kind == "auction" and observation.payload.source == "item" then
+      for _, item in ipairs(observation.payload.items) do
+        if item.id == 856 then bagRows[#bagRows + 1] = item end
+      end
+    end
+  end
+  equal("the recorder writes the five grouped rows", #bagRows, 5)
+  equal("with the price of one as the unit", bagRows[1].unit, 867)
+  equal("and the price of the whole row as the buyout", bagRows[1].buyout, 15 * 867)
+  equal("and how many there are", bagRows[1].q, 15)
+
+  -- A floor on the profit, for a list full of deals worth a few copper.
+  equal("money is read as the player types it", gate.ParseMoney("1g 20s"), 12000)
+  equal("a bare number is copper", gate.ParseMoney("75"), 75)
+  equal("silver alone is read", gate.ParseMoney("50s"), 5000)
+  equal("anything else is refused", gate.ParseMoney("lots"), nil)
+  equal("and so is a number with a stray word", gate.ParseMoney("5s please"), nil)
+  gate.SlashCommand("deals min 1s")
+  equal("the floor is kept", gate.DealsMinProfit(), 100)
+  equal("a deal under the floor is not counted", gate.DealCount(), 3)
+  equal("nor listed", DealFor(gate, 2589) ~= nil and DealFor(gate, 2589).profit >= 100, true)
+  gate.SlashCommand("deals min 2s")
+  equal("a higher floor hides more", gate.DealCount(), 1)
+  stub.state.printed = {}
+  gate.SlashCommand("deals min soon")
+  check("a floor that is not money prints how to use it",
+    table.concat(stub.state.printed, "\n"):find("/ewow deals min 50s", 1, true) ~= nil)
+  gate.SlashCommand("deals min 0")
+  equal("a floor of nothing shows every deal again", gate.DealCount(), 3)
+
   equal("the deal finder sent no browse query", stub.state.auctionCalls.SendBrowseQuery, nil)
   equal("the deal finder sent no search query", stub.state.auctionCalls.SendSearchQuery, nil)
   equal("the deal finder sent no sell search query", stub.state.auctionCalls.SendSellSearchQuery, nil)
@@ -1564,7 +1613,7 @@ do
   stub.state.printed = {}
   gate.SlashCommand("deals list")
   local listed = Plain(table.concat(stub.state.printed, "\n"))
-  check("/ewow deals list prints the deals", listed:find("1 item under vendor price:", 1, true) ~= nil
+  check("/ewow deals list prints the deals", listed:find("2 items under vendor price:", 1, true) ~= nil
     and listed:find("[Thunderfury]: buy 1 for 2500g 0s 0c, vendor 3000g 0s 0c, profit 500g 0s 0c", 1, true) ~= nil, listed)
   gate.SlashCommand("deals clear")
   equal("/ewow deals clear empties the list", gate.DealCount(), 0)
@@ -1785,7 +1834,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.2.9")
+  equal("the capture holds the addon version", capture.addon, "0.2.10")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -2160,7 +2209,7 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.9 addon version", foreverDb.addon, "0.2.9")
+equal("the forever file carries the 0.2.10 addon version", foreverDb.addon, "0.2.10")
 check("the forever file holds what that client records", #foreverDb.observations >= 7, #foreverDb.observations)
 local foreverAuctions = 0
 for _, observation in ipairs(foreverDb.observations) do
@@ -2207,7 +2256,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.9 addon version", saved.addon, "0.2.9")
+  equal("the " .. suffix .. " file carries the 0.2.10 addon version", saved.addon, "0.2.10")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)

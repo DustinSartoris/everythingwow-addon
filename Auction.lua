@@ -353,9 +353,15 @@ local function ItemKeyString(itemKey)
   }, ":")
 end
 
---[[ One item's auctions, each a buyout for the whole auction and its
-     quantity. An auction with a bid and no buyout still records its
-     quantity, as the classic scan does. ]]
+--[[ One item's auctions. The client groups identical auctions into one
+     row: quantity is how many are for sale at that price, and buyoutAmount
+     is the price of one of them, not of the row. So unit is buyoutAmount
+     and buyout is the price of the whole row, as every other read writes
+     them. Before 0.2.10 this read took buyoutAmount for the whole row, so a
+     row of 15 bags at 8 silver 67 each was written with a unit of 57
+     copper; the owner's screenshot of 23 November 2026 showed it. A row
+     with a bid and no buyout still records its quantity, as the classic
+     scan does. ]]
 local function ReadItem(itemKey)
   if not ModernOn() or InCombat() or not CanRead("item") then return 0 end
   if type(itemKey) ~= "table" or type(itemKey.itemID) ~= "number" then return 0 end
@@ -375,7 +381,9 @@ local function ReadItem(itemKey)
       local info = C_AuctionHouse.GetItemSearchResultInfo(itemKey, index)
       if type(info) ~= "table" then return end
       local id = type(info.itemKey) == "table" and info.itemKey.itemID or itemKey.itemID
-      entry = Entry(id, info.quantity, nil, info.buyoutAmount)
+      local quantity, each = info.quantity, info.buyoutAmount
+      local whole = (type(each) == "number" and type(quantity) == "number") and each * quantity or nil
+      entry = Entry(id, quantity, each, whole)
     end)
     if entry then entries[#entries + 1] = entry end
   end

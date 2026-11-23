@@ -475,7 +475,8 @@ auction's item link, for the deal finder from 0.2.9.
 spec.browse lists browse rows, each an item id, a total quantity, a lowest
 price and an optional battle pet species. spec.commodities maps an item id
 to its listings, each a quantity and a unit price. spec.items maps an item
-id to its auctions, each a quantity and an optional buyout. Every commodity
+id to its auctions, each a quantity and an optional buyout, which is the
+price of one, as the client gives it. Every commodity
 and item answer carries an owners list and a bidder, so a test can prove
 neither ever reaches the file. spec.omit names functions to leave out, so a
 test can stand in for a client carrying only part of the namespace. Every

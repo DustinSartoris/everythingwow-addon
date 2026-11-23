@@ -6,6 +6,14 @@ This is version 0.2.6. It is free and open source under the MIT license.
 
 ## Changes
 
+**0.2.10** reads a grouped item row as the price of one. On 23 November 2026 the owner opened Blue Leather Bag from the new window and the row changed to "Buy 64 for 62s 32c": the auction house showed 15 bags at 8 silver 67 each, and the addon had taken 8 silver 67 for all 15.
+
+- **The cause.** The modern auction house groups identical auctions of an item into one row, and `GetItemSearchResultInfo` gives that row's `buyoutAmount` as the price of one and `quantity` as how many there are at that price. Both readers took `buyoutAmount` for the whole row.
+- **The window.** An item search now counts a row as `quantity` at `buyoutAmount` each, so the bags read as what they are: a few copper under the vendor's price each, and only the rows priced under it.
+- **The recorder.** The same read in `Auction.lua` wrote such a row with `unit` as the price divided by the quantity. It now writes `unit` as the price of one and `buyout` as the price of the row, as the browse and commodity reads always have. Rows of one, which is most gear, were always right. The site publishes no price from these rows (its Forever prices come from Blizzard's auction data through the worker), so nothing shown on the site was wrong.
+- **`/ewow deals min <amount>`.** Hides deals with less profit than the amount, for the session: `/ewow deals min 50s`, `/ewow deals min 1g`, and `/ewow deals min 0` to show every deal again.
+- **The version and the tests.** Both tables of contents carry `## Version: 0.2.10`. The tests read the owner's own row of bags through both readers and fail against 0.2.9; the suite reads 678 assertions, from 656, under Lua 5.1 and 5.4.
+
 **0.2.9** adds a window of auctions listed under their vendor price. On 23 November 2026 the owner asked for the addon to look for items being sold for less than a vendor pays for them, and to show what to buy and for how much, from the same auction house reading the recorder already does.
 
 - **What it finds.** An auction is a deal when its buyout for one item is lower than the item's vendor sell price, so buying it and selling it to any vendor leaves a profit. An item no vendor buys is never a deal, and neither is one of the player's own auctions. The sell price is the client's own, from its item cache; an item the client has not loaded yet is asked again a second later, up to three times.
