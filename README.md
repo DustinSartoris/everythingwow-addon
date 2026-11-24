@@ -6,6 +6,14 @@ This is version 0.2.6. It is free and open source under the MIT license.
 
 ## Changes
 
+**0.3.0** brings everythingwow.com's route planner into the game. `/ewow route Booty Bay` plans the trip from where your character stands, and `/ewow route Orgrimmar > Undercity` plans it between any two places: the steps in order, and how long the trip takes as a low, a usual and a high time. It is the first part of the travel features; the route on the world map comes next.
+
+- **The site's own planner.** `Travel.lua` is the planner behind the site's WoW Forever map, written again in Lua, and `TravelData.lua` is the site's own map data: 46 zones, 127 places, 49 land crossings, 15 boats, zeppelins, trams and portals, and 195 measured flight times. `tools/gen_travel_data.py` writes that file from the site's files, so the game and the website answer the same trip the same way.
+- **What it reads.** Your faction, whether your character is a Skyborne, and the map you stand on. Nothing else, and it sends nothing. It records nothing: a planned route makes no observation.
+- **`/ewow route speed`.** Routes are timed on foot until you say otherwise: `/ewow route speed 60`, `100`, `travel` or `foot`. That one setting is the only thing the planner saves.
+- **WoW Forever only.** The facts are that world's, so on any other client the command says so and stops.
+- **The version and the tests.** Both tables of contents list `TravelData.lua` and `Travel.lua` and carry `## Version: 0.3.0`. Every answer was compared with the site's planner on 7,852 trips before release, and the tests keep 258 of them, each compared step by step, to the second and to the word, beside the name search, the map lookup and the command; the suite reads 2,596 assertions, from 842, under Lua 5.1 and 5.4.
+
 **0.2.13** leaves alone the items the site already has. On 24 November 2026 the owner's first file from 0.2.12 held 400 item observations, the session's whole allowance, and 340 of them were items the site already had from Blizzard: an id of 200,000 or more turned out to be a weak sign of a missing item, since Blizzard's own WoW Forever data holds 11,770 such ids.
 
 - **`Known.lua`.** A new file holds those 11,770 ids as 2,147 ranges, as the site's public database held them on 24 November 2026. It is data, not code, and nothing in it is read from the player's game.
@@ -205,6 +213,7 @@ The map id and the coordinates are the client's own: `C_Map.GetBestMapForUnit("p
 | Command | What it does |
 |---|---|
 | `/ewow status` | The client detected, the capability table, the recorders that cannot run on this client, the last forbidden action reported, the counts per kind, the number dropped, and the skipped, deduped, and ignored counts with the reason for each, plus the game version and the patch. |
+| `/ewow route <place>` | On WoW Forever, plans the trip to a place from where you stand, with the site's own planner: the steps and the time. `/ewow route <place> > <place>` plans between two places, and `/ewow route speed foot`, `travel`, `60` or `100` sets the speed routes are timed at. Records nothing. |
 | `/ewow clear` | Throws away everything recorded so far. Start here if you would rather not upload something. |
 | `/ewow snapshot` | Records your character snapshot now rather than waiting for the next login. |
 | `/ewow path` | Prints where the file is written. |

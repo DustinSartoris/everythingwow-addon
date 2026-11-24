@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.2.13"
+EW.ADDON_VERSION = "0.3.0"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -1287,8 +1287,11 @@ function EW.SlashCommand(message)
   elseif command == "deals" then
     -- Deals.lua's window, from 0.2.9: the auctions listed under vendor price.
     if EW.DealsCommand then EW.DealsCommand(rest) end
+  elseif command == "route" then
+    -- Travel.lua's planner, from 0.3.0: the site's own route planner, in the game.
+    if EW.Travel and EW.Travel.Command then EW.Travel.Command(rest) end
   else
-    EW.Print("Commands: /ewow status, /ewow deals, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off, /ewow talents, /ewow talents clear.")
+    EW.Print("Commands: /ewow status, /ewow deals, /ewow route <place>, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off, /ewow talents, /ewow talents clear.")
   end
 end
 
