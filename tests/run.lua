@@ -44,7 +44,7 @@ end
 
 stub.Install(_G)
 
-local FILES = { "Core", "Items", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Talents", "Auction", "Deals" }
+local FILES = { "Core", "Known", "Items", "Units", "Objects", "Quests", "Vendor", "Loot", "Snapshot", "Talents", "Auction", "Deals" }
 
 --[[ Loads every addon file fresh into a new table, the way the game loads
      them once at login: EW.Client and EW.Caps are computed as Core.lua
@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.2.12")
+equal("addon is the addon version", saved.addon, "0.2.13")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -997,7 +997,7 @@ do
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
   check("status prints the 0.2.7 addon version",
-    text:find("version 0.2.12", 1, true) ~= nil, text)
+    text:find("version 0.2.13", 1, true) ~= nil, text)
 end
 
 --[[
@@ -1543,6 +1543,12 @@ do
     return list
   end
 
+  -- These cases use made up ids, so every session starts with an empty list of known items.
+  local function FreshItems(project, build)
+    local addon = LoadFreshAddon(project, build)
+    addon.KNOWN_ITEMS = ""
+    return addon
+  end
   local savedLoot, savedMerchant, savedTime = stub.state.loot, stub.state.merchant, stub.state.time
   local savedRewards, savedQuestId, savedQuestTitle = stub.state.questRewards, stub.state.questId, stub.state.questTitle
   local savedNpc = stub.state.units.npc
@@ -1552,7 +1558,7 @@ do
   stub.InstallModernAuction(_G, { browse = { { id = 213422, q = 40, min = 300 }, { id = 2589, q = 5, min = 120 } } })
 
   -- Forever, the one client the recorder runs on.
-  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  local gate = FreshItems(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
   gate.SlashCommand("clear")
   equal("an item under the floor is not noted", gate.NoteItem(19019), false)
   equal("and the item cache was never asked for it", #asked, 0)
@@ -1677,19 +1683,19 @@ do
 
   -- A new session reads the saved memory: the same file, a fresh load.
   local savedDb = _G.EverythingWoWDB
-  local second = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  local second = FreshItems(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
   _G.EverythingWoWDB = savedDb
   equal("a new session does not note an item the file remembers", second.NoteItem(263015), false)
   stub.state.time = stub.state.time + 2 * 86400
   equal("nor again later in that session", second.NoteItem(263015), false)
   equal("an item the file does not remember is noted in it", second.NoteItem(270099), true)
   savedDb = _G.EverythingWoWDB
-  local third = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  local third = FreshItems(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
   _G.EverythingWoWDB = savedDb
   equal("a session past the fortnight notes it again", third.NoteItem(263015), true)
   equal("but not an item noted inside it", third.NoteItem(270099), false)
   savedDb = _G.EverythingWoWDB
-  local patched = LoadFreshAddon(1, { "1.60.2", "70400", "Dec 2 2026", 16001 })
+  local patched = FreshItems(1, { "1.60.2", "70400", "Dec 2 2026", 16001 })
   _G.EverythingWoWDB = savedDb
   equal("after a patch every item is noted afresh", patched.NoteItem(274048), true)
   equal("and the memory starts over for the patch", patched.Database().itemsPatch, "1.60.2")
@@ -1700,7 +1706,7 @@ do
     { "classic era", 2, { "1.15.9", "60000", "Sep 17 2026", 11509 } },
     { "mists classic", 19, { "5.5.4", "60000", "Sep 17 2026", 50504 } },
   }) do
-    local other = LoadFreshAddon(client[2], client[3])
+    local other = FreshItems(client[2], client[3])
     equal(client[1] .. " notes no item", other.NoteItem(263015), false)
     equal(client[1] .. " writes no item observation", #Items(other), 0)
     equal(client[1] .. " keeps no item memory", other.Database().items, nil)
@@ -1708,12 +1714,76 @@ do
 
   RemoveItemCache()
   -- A client with no item cache functions at all writes nothing and throws nothing.
-  local bare = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  local bare = FreshItems(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
   equal("forever with no item functions notes nothing", bare.NoteItem(263015), false)
 
   stub.state.loot, stub.state.merchant, stub.state.time = savedLoot, savedMerchant, savedTime
   stub.state.questRewards, stub.state.questId, stub.state.questTitle = savedRewards, savedQuestId, savedQuestTitle
   stub.state.units.npc = savedNpc
+end
+
+--[[
+0.2.13: the list of items the site already has, in Known.lua. On 24 November
+2026 the owner's first file from 0.2.12 held 400 item observations and 340
+of them were items the site had from Blizzard, so the recorder now leaves a
+listed item alone. The list is a string of ids and "low-high" ranges.
+]]
+do
+  local asked = {}
+  _G.GetItemInfo = function(item)
+    asked[#asked + 1] = item
+    return "Item " .. tostring(item), nil, 1, 40, nil, "Armor", "Cloth", 1, "", 135000, 10, 4, 1
+  end
+  local gate = LoadFreshAddon(1, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  gate.SlashCommand("clear")
+
+  -- The shipped list.
+  local count, ids, last, ordered = 0, 0, 0, true
+  for part in gate.KNOWN_ITEMS:gmatch("[^,]+") do
+    local low, high = part:match("^(%d+)%-(%d+)$")
+    if not low then low = part:match("^(%d+)$") high = low end
+    low, high = tonumber(low), tonumber(high)
+    if not low or low <= last or high < low then ordered = false break end
+    count, ids, last = count + 1, ids + high - low + 1, high
+  end
+  check("the shipped list is ids and ranges in rising order", ordered)
+  equal("the shipped list holds 2,147 ranges", count, 2147)
+  equal("covering 11,770 ids", ids, 11770)
+  check("every listed id is at or above the recorder's floor", tonumber(gate.KNOWN_ITEMS:match("^(%d+)")) >= gate.ITEM_ID_FLOOR)
+  equal("the list carries its date", gate.KNOWN_ITEMS_DATE, "2026-11-24")
+  equal("an item the site has is known", gate.ItemKnown(277104), true)
+  equal("the first listed id is known", gate.ItemKnown(202251), true)
+  equal("the last listed id is known", gate.ItemKnown(291874), true)
+  equal("an item the site lacks is not", gate.ItemKnown(274048), false)
+  equal("an id above the list is not", gate.ItemKnown(291875), false)
+  equal("an id under the list is not", gate.ItemKnown(202250), false)
+
+  equal("a listed item is not noted", gate.NoteItem(277104), false)
+  equal("and the item cache is never asked for it", #asked, 0)
+  equal("an unlisted item is noted", gate.NoteItem(274048), true)
+  equal("an id past the end of the list is noted", gate.NoteItem(291875), true)
+
+  -- A list of the test's own: the ends of a range, a single id, the gaps.
+  gate.KNOWN_ITEMS = "250000-250010,250020,250030-250031"
+  for id, known in pairs({ [249999] = false, [250000] = true, [250005] = true, [250010] = true, [250011] = false,
+    [250019] = false, [250020] = true, [250021] = false, [250030] = true, [250031] = true, [250032] = false }) do
+    equal("in the test's list, " .. id .. " reads as " .. tostring(known), gate.ItemKnown(id), known)
+  end
+  equal("a listed id of the test's list is not noted", gate.NoteItem(250005), false)
+  equal("the id beside it is", gate.NoteItem(250011), true)
+
+  -- A list that cannot be read is no list: everything is noted, as before.
+  for _, bad in ipairs({ "250000-249000", "250010,250005", "250000-abc", "250000--250010", 5 }) do
+    gate.KNOWN_ITEMS = bad
+    equal("a list written as " .. tostring(bad) .. " knows nothing", gate.ItemKnown(250005), false)
+  end
+  gate.KNOWN_ITEMS = nil
+  equal("no list at all knows nothing", gate.ItemKnown(250005), false)
+  equal("and its items are noted", gate.NoteItem(250006), true)
+  gate.KNOWN_ITEMS = ""
+  equal("an empty list knows nothing", gate.ItemKnown(250005), false)
+
+  _G.GetItemInfo = nil
 end
 
 --[[
@@ -2169,7 +2239,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.2.12")
+  equal("the capture holds the addon version", capture.addon, "0.2.13")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -2565,7 +2635,7 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.2.12 addon version", foreverDb.addon, "0.2.12")
+equal("the forever file carries the 0.2.13 addon version", foreverDb.addon, "0.2.13")
 check("the forever file holds what that client records", #foreverDb.observations >= 8, #foreverDb.observations)
 equal("the forever file's last observation is the item", foreverDb.observations[#foreverDb.observations].kind, "item")
 check("the forever file remembers the item it noted", type(foreverDb.items) == "table" and foreverDb.items[263015] ~= nil)
@@ -2614,7 +2684,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.2.12 addon version", saved.addon, "0.2.12")
+  equal("the " .. suffix .. " file carries the 0.2.13 addon version", saved.addon, "0.2.13")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)

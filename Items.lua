@@ -27,7 +27,10 @@ again the next few times an item is met, the way the deals window reads a
 sell price.
 
 It runs on WoW Forever alone, and only for ids from EW.ITEM_ID_FLOOR up,
-where the gap is. An item is written once: the saved file remembers the day
+where the gap is. From 0.2.13 it also leaves alone every item in
+EW.KNOWN_ITEMS, the list in Known.lua of the items the site already has from
+Blizzard: the owner's first file from 0.2.12 spent 340 of its 400 item
+observations on such items. An item is written once: the saved file remembers the day
 each was noted and notes it again only after EW.ITEM_RENOTE_DAYS, after a
 patch, or after /ewow clear, and a session writes at most
 EW.ITEMS_PER_SESSION of them, so a first walk through a full auction house
@@ -55,6 +58,46 @@ local pending, pendingCount = {}, 0
 local written = 0
 local lastSweep = 0
 local on = nil
+
+--[[
+Whether the site already has the item from Blizzard, by EW.KNOWN_ITEMS: a
+string of ids and "low-high" ranges in rising order. It is read once into two
+arrays and searched by halving. A list that cannot be read is no list, so
+every item is noted, as before 0.2.13.
+]]
+local knownFrom, knownLow, knownHigh = nil, {}, {}
+local function ReadKnown()
+  knownFrom, knownLow, knownHigh = EW.KNOWN_ITEMS, {}, {}
+  if type(knownFrom) ~= "string" then return end
+  local low, high, last, count = {}, {}, 0, 0
+  for part in knownFrom:gmatch("[^,]+") do
+    local a, b = part:match("^(%d+)%-(%d+)$")
+    if not a then a = part:match("^(%d+)$") b = a end
+    a, b = tonumber(a), tonumber(b)
+    -- One entry out of order or out of shape and the whole list is refused.
+    if not a or not b or a <= last or b < a then return end
+    count = count + 1
+    low[count], high[count], last = a, b, b
+  end
+  knownLow, knownHigh = low, high
+end
+
+local function Known(itemId)
+  if knownFrom ~= EW.KNOWN_ITEMS then pcall(ReadKnown) end
+  local first, last = 1, #knownLow
+  while first <= last do
+    local middle = math.floor((first + last) / 2)
+    if itemId < knownLow[middle] then
+      last = middle - 1
+    elseif itemId > knownHigh[middle] then
+      first = middle + 1
+    else
+      return true
+    end
+  end
+  return false
+end
+EW.ItemKnown = Known
 
 local function On()
   if on == nil then
@@ -233,6 +276,7 @@ function EW.NoteItem(itemId, link)
   if itemId < EW.ITEM_ID_FLOOR or itemId > 9999999 then return false end
   if type(link) == "string" and not link:find("item:%d") then return false end
   local wrote = false
+  if not settled[itemId] and Known(itemId) then settled[itemId] = true end
   if not settled[itemId] then
     local ok = pcall(function()
       local noted = Memory()[itemId]

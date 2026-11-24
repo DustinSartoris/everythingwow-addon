@@ -2,6 +2,13 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.2.13** leaves alone the items the site already has. On 24 November 2026 the owner's first file from 0.2.12 held 400 item observations, the session's whole allowance, and 340 of them were items the site already had from Blizzard: an id of 200,000 or more turned out to be a weak sign of a missing item, since Blizzard's own WoW Forever data holds 11,770 such ids.
+
+- **`Known.lua`.** A new file holds those 11,770 ids as 2,147 ranges, as the site's public database held them on 24 November 2026. It is data, not code, and nothing in it is read from the player's game.
+- **The recorder.** `Items.lua` no longer notes an item on that list, and never asks the item cache about one. Everything else is as in 0.2.12: WoW Forever alone, ids from 200,000 up, once per item per fourteen days, 400 a session.
+- **A stale list is harmless.** A listed item is one the site has. An item Blizzard adds later is noted and the site leaves it alone, since it adds a page only where it holds none. A list that cannot be read is treated as no list, and every item is noted as before.
+- **The version and the tests.** Both tables of contents list `Known.lua` and carry `## Version: 0.2.13`. The tests read the shipped list (its order, its 2,147 ranges and 11,770 ids), a listed and an unlisted item, the ends of a range, a single id, the gaps, and five lists that cannot be read; the suite reads 842 assertions, from 806, under Lua 5.1 and 5.4.
+
 **0.2.12** notes the items Blizzard's item API does not hold. On 23 November 2026 the site's worker asked the API by id for four items WoW Forever's own auction houses sell, and each answered 404; 295 of the 296 auction items the site had no page for were new WoW Forever items, ids above 200,000. Their names and what they are can only come from players.
 
 - **A new kind, `item`.** The first time the addon meets such an item, at the auction house, in loot, at a vendor or in a quest's rewards, it writes one observation of it from the client's own item cache: `n`, the name; `ql`, the quality number; `il`, the item level; `rl`, the level it requires; `c` and `sc`, the class and subclass numbers; `slot`, the equip location token; `stack`; `sell`, what a vendor pays in copper; `bind`; `stats`, the base item's stats by the client's own keys; and `sp`, the spell a use triggers.
