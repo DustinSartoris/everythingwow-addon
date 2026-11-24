@@ -2,6 +2,7 @@ package-as: EverythingWoW
 
 ignore:
   - tests
+  - tools
   - .github
   - .pkgmeta
   - README.md
