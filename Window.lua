@@ -56,15 +56,15 @@ local KIND_LABELS = {
 -- How each kind of place is drawn on the map: its size, its color, the
 -- word for it, and how far above the others it lies.
 local PIN_STYLES = {
-  capital_city = { size = 13, color = { 1, 0.82, 0.25 }, label = "Capital", level = 6 },
-  town = { size = 8, color = { 0.95, 0.93, 0.88 }, label = "Town", level = 4 },
-  harbor = { size = 9, color = { 0.35, 0.8, 0.95 }, label = "Harbor", level = 5 },
-  zeppelin_tower = { size = 9, color = { 0.35, 0.8, 0.95 }, label = "Zeppelin tower", level = 5 },
-  sky_dock = { size = 9, color = { 0.35, 0.8, 0.95 }, label = "Sky dock", level = 5 },
-  dungeon = { size = 8, color = { 0.7, 0.5, 0.95 }, label = "Dungeon", level = 3 },
-  raid = { size = 9, color = { 0.95, 0.4, 0.75 }, label = "Raid", level = 3 },
-  battleground = { size = 8, color = { 0.95, 0.35, 0.3 }, label = "Battleground", level = 3 },
-  landmark = { size = 7, color = { 0.65, 0.65, 0.65 }, label = "Landmark", level = 2 },
+  capital_city = { size = 16, color = { 1, 0.82, 0.25 }, label = "Capital", level = 6 },
+  town = { size = 10, color = { 0.95, 0.93, 0.88 }, label = "Town", level = 4 },
+  harbor = { size = 11, color = { 0.35, 0.8, 0.95 }, label = "Harbor", level = 5 },
+  zeppelin_tower = { size = 11, color = { 0.35, 0.8, 0.95 }, label = "Zeppelin tower", level = 5 },
+  sky_dock = { size = 11, color = { 0.35, 0.8, 0.95 }, label = "Sky dock", level = 5 },
+  dungeon = { size = 10, color = { 0.7, 0.5, 0.95 }, label = "Dungeon", level = 3 },
+  raid = { size = 11, color = { 0.95, 0.4, 0.75 }, label = "Raid", level = 3 },
+  battleground = { size = 10, color = { 0.95, 0.35, 0.3 }, label = "Battleground", level = 3 },
+  landmark = { size = 8, color = { 0.65, 0.65, 0.65 }, label = "Landmark", level = 2 },
 }
 
 -- The color of a zone's outline and name, by whose land it is.
@@ -158,7 +158,7 @@ function EW.MapLabelSpots(scale)
     local x, y = EW.MapPoint(zone.x, zone.y)
     if x then
       x, y = x * scale, y * scale
-      local width, height = #zone.name * 5.2 + 4, 11
+      local width, height = #zone.name * 5.8 + 4, 11
       local best, bestHits = 0, nil
       for _, move in ipairs({ 0, 11, -11, 21, -21 }) do
         local hits = Hits(x, y + move, width, height)
@@ -304,11 +304,33 @@ local function DrawRoute()
   local to = picks.to or (answer and answer.to) or nil
   PlaceMarker(map, map.here, from)
   PlaceMarker(map, map.goal, to)
+  -- The words beside the green ring: where the character is, or where the
+  -- trip was told to start.
+  if map.here.node then
+    map.hereText:SetText(picks.from and "Start" or "You are here")
+    map.hereText:Show()
+  else
+    map.hereText:Hide()
+  end
+end
+
+--[[ What stands over the From box: where the trip starts when the box is
+     left empty. ]]
+local function FromCaption()
+  if picks.from then return "From" end
+  local typed = ""
+  pcall(function() typed = Trim(window.from:GetText() or "") end)
+  if typed ~= "" then return "From" end
+  local here = EW.Travel and EW.VersionKey() == "forever" and EW.Travel.Here() or nil
+  local name = here and EW.Travel.NodeName(here) or nil
+  if name then return "From (where you stand: " .. name .. ")" end
+  return "From"
 end
 
 local function RefreshRoute()
   local frame = window
   frame.speed:SetText("Speed: " .. SPEED_LABELS[CurrentSpeed()])
+  frame.fromCaption:SetText(FromCaption())
   local steps = (answer and answer.ok and answer.steps) or {}
   local perPage = EW.WINDOW_STEP_ROWS
   local pages = math.max(1, math.ceil(#steps / perPage))
@@ -410,11 +432,35 @@ function EW.WindowPick(node, mouseButton)
   if mouseButton == "RightButton" then
     picks.from = node
     window.from:SetText(name)
+    -- One place cannot be both ends: the newer pick stays and the other end
+    -- is asked for again.
+    if picks.to == node then
+      picks.to = nil
+      window.to:SetText("")
+    end
   else
     picks.to = node
     window.to:SetText(name)
+    -- The start goes back to where the character stands.
+    if picks.from == node then
+      picks.from = nil
+      window.from:SetText("")
+    end
   end
   Plan()
+end
+
+--[[ Empties both ends and the answer: the window as it first opened. ]]
+function EW.WindowClear()
+  if not window then return end
+  picks.from, picks.to = nil, nil
+  answer = nil
+  stepPage = 1
+  pcall(function()
+    window.from:SetText("")
+    window.to:SetText("")
+  end)
+  Refresh()
 end
 
 --[[ The tooltip of a dot or a zone's name on the map. ]]
@@ -487,7 +533,7 @@ local function BuildMap(frame, left, top, width, height)
     if spot then
       local color = ZONE_COLORS[zone.faction] or ZONE_COLORS.none
       local button = CreateFrame("Button", nil, map)
-      button:SetSize(#zone.name * 5.2 + 4, 11)
+      button:SetSize(#zone.name * 5.8 + 4, 11)
       button:SetPoint("CENTER", map, "TOPLEFT", spot[1], -spot[2])
       pcall(function() button:SetFrameLevel(baseLevel) end)
       local text = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -539,12 +585,36 @@ local function BuildMap(frame, left, top, width, height)
     ring:Hide()
     return ring
   end
-  map.here = Ring(20, 0.3, 1, 0.4)
-  map.goal = Ring(24, 1, 0.82, 0.2)
+  map.here = Ring(22, 0.3, 1, 0.4)
+  map.goal = Ring(26, 1, 0.82, 0.2)
+  map.hereText = map:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  map.hereText:SetPoint("BOTTOM", map.here, "TOP", 0, 1)
+  map.hereText:SetTextColor(0.3, 1, 0.4, 1)
+  map.hereText:Hide()
+
+  -- The key: what each color of dot is.
+  map.key = {}
+  local keyLeft = 6
+  for _, entry in ipairs({
+    { "capital_city", "Capital" }, { "town", "Town" }, { "harbor", "Harbor or tower" },
+    { "dungeon", "Dungeon" }, { "raid", "Raid" }, { "battleground", "Battleground" }, { "landmark", "Landmark" },
+  }) do
+    local style = PIN_STYLES[entry[1]]
+    local dot = map:CreateTexture(nil, "OVERLAY")
+    dot:SetSize(9, 9)
+    dot:SetTexture(MEDIA .. "dot")
+    dot:SetVertexColor(style.color[1], style.color[2], style.color[3], 1)
+    dot:SetPoint("BOTTOMLEFT", map, "BOTTOMLEFT", keyLeft, 22)
+    local word = map:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    word:SetPoint("LEFT", dot, "RIGHT", 3, 0)
+    word:SetText(entry[2])
+    map.key[#map.key + 1] = word
+    keyLeft = keyLeft + 16 + #entry[2] * 5.6 + 8
+  end
 
   local hint = map:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   hint:SetPoint("BOTTOMLEFT", map, "BOTTOMLEFT", 6, 6)
-  hint:SetText("Click a place to go there. Right-click a place to start from it.")
+  hint:SetText("Click a place to go there from where you stand. Right-click a place to start from it instead.")
   map.hint = hint
   return map
 end
@@ -645,6 +715,7 @@ local function BuildWindow()
     local caption = Route(Text("GameFontNormalSmall"))
     caption:SetPoint("TOPLEFT", frame, "TOPLEFT", column, top)
     caption:SetText(label)
+    if which == "from" then frame.fromCaption = caption end
     local box = Route(CreateFrame("EditBox", nil, frame, "InputBoxTemplate"))
     box:SetSize(side - 8, 20)
     box:SetPoint("TOPLEFT", frame, "TOPLEFT", column + 6, top - 14)
@@ -655,19 +726,22 @@ local function BuildWindow()
     -- A typed name takes the place of one picked on the map.
     box:SetScript("OnTextChanged", function(_, userInput)
       if userInput then picks[which] = nil end
+      if which == "from" and frame.fromCaption then pcall(function() frame.fromCaption:SetText(FromCaption()) end) end
     end)
     return box
   end
   frame.from = Box("From", -64, "from")
   frame.to = Box("To", -104, "to")
-  frame.speed = Route(Button("Speed", 150, function()
+  frame.speed = Route(Button("Speed", 130, function()
     EW.NextTravelSpeed()
     -- A new speed is a new answer to the same question.
     if answer then Plan() else Refresh() end
   end))
   frame.speed:SetPoint("TOPLEFT", frame, "TOPLEFT", column, -146)
-  local plan = Route(Button("Plan Route", 110, Plan))
-  plan:SetPoint("LEFT", frame.speed, "RIGHT", 8, 0)
+  local plan = Route(Button("Plan", 62, Plan))
+  plan:SetPoint("LEFT", frame.speed, "RIGHT", 6, 0)
+  frame.clear = Route(Button("Clear", 62, EW.WindowClear))
+  frame.clear:SetPoint("LEFT", plan, "RIGHT", 6, 0)
 
   frame.heading = Route(Text("GameFontNormal"))
   frame.heading:SetPoint("TOPLEFT", frame, "TOPLEFT", column, -180)
@@ -822,47 +896,27 @@ local function PlaceMinimapButton()
 end
 
 --[[
-The button is drawn the way the game's own round minimap buttons are: a
-dark disc, the icon on it, and the gold ring over both. The ring's picture
-is a little different on the modern client and on the classic ones, so the
-sizes follow the client. The icon is everythingwow.com's own mark.
+The button is one picture: everythingwow.com's mark, cut round, with its
+gold rim drawn on it. It is set in the middle of the button and fills it,
+so there are no parts for a client to set apart from one another, which is
+how 0.3.3's ring and icon came out of line.
 ]]
 local function BuildMinimapButton()
   local button = CreateFrame("Button", "EverythingWoWMinimapButton", Minimap)
   button:SetSize(31, 31)
   button:SetFrameStrata("MEDIUM")
   pcall(function() button:SetFrameLevel(8) end)
-  local modern = false
-  pcall(function() modern = WOW_PROJECT_ID ~= nil and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE end)
-  local ground = button:CreateTexture(nil, "BACKGROUND")
-  ground:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
   local icon = button:CreateTexture(nil, "ARTWORK")
-  icon:SetTexture(MEDIA .. "icon")
-  local ring = button:CreateTexture(nil, "OVERLAY")
-  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-  ring:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
-  if modern then
-    ring:SetSize(50, 50)
-    ground:SetSize(24, 24)
-    ground:SetPoint("CENTER", button, "CENTER", 0, 1)
-    icon:SetSize(18, 18)
-    icon:SetPoint("CENTER", button, "CENTER", 0, 1)
-  else
-    ring:SetSize(53, 53)
-    ground:SetSize(20, 20)
-    ground:SetPoint("TOPLEFT", button, "TOPLEFT", 7, -5)
-    icon:SetSize(17, 17)
-    icon:SetPoint("TOPLEFT", button, "TOPLEFT", 7, -6)
-  end
-  -- A round cut for the square icon, where the client can make one.
+  icon:SetTexture(MEDIA .. "minimap")
+  icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+  icon:SetSize(31, 31)
+  button.icon = icon
   pcall(function()
-    local mask = button:CreateMaskTexture()
-    mask:SetAllPoints(icon)
-    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    icon:AddMaskTexture(mask)
+    button:SetHighlightTexture(MEDIA .. "ring")
+    local glow = button:GetHighlightTexture()
+    glow:SetBlendMode("ADD")
+    glow:SetVertexColor(1, 0.9, 0.5, 0.6)
   end)
-  button.icon, button.ring, button.modern = icon, ring, modern
-  pcall(function() button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight") end)
   button:RegisterForClicks("AnyUp")
   button:SetScript("OnClick", function() pcall(EW.ToggleWindow) end)
   pcall(function()

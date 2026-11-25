@@ -2,9 +2,17 @@
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.3.3. It is free and open source under the MIT license.
+This is version 0.3.4. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.3.4** mends what the first look at 0.3.3 in the game showed.
+
+- **The minimap button.** It is now one picture, everythingwow.com's mark cut round with its gold rim drawn on it, set in the middle of the button. In 0.3.3 the rim, the disc and the mark were three pictures, and on WoW Forever they did not sit in line.
+- **Where you are.** A green ring marked "You are here" stands on the map as the window opens, and the From box's caption says where the trip starts while the box is empty.
+- **Start and destination.** A click is always where to go, and a right-click where to start. One place can no longer be both: the newer pick stays, and the other end goes back to where you stand or is asked for again. A Clear button puts the window back as it opened.
+- **Easier to read.** The dots are larger, and a key under the map says what each color of dot is.
+- **The version and the tests.** Both tables of contents carry `## Version: 0.3.4`. The tests pick one place for both ends each way round, clear the window, and read the caption, the key and the button's one picture; the suite reads 2,850 assertions, from 2,825, under Lua 5.1 and 5.4.
 
 **0.3.3** puts a map in the window. In 0.3.2 the Route page had two boxes to type a place into; now it opens on a map of the world, and a click on a place plans the trip there.
 

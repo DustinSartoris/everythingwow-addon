@@ -168,7 +168,9 @@ return function(t)
   equal("and its name for the tooltip", orgrimmar.tipName, "Orgrimmar")
   equal("with what it is and where", orgrimmar.tipKind, "Capital, Durotar")
   equal("its picture is the addon's own dot", orgrimmar.scripts.OnEnter ~= nil and EW.MEDIA, "Interface\\AddOns\\EverythingWoW\\Media\\")
-  equal("the map says how to use it", map.hint.text, "Click a place to go there. Right-click a place to start from it.")
+  equal("the map says how to use it", map.hint.text, "Click a place to go there from where you stand. Right-click a place to start from it instead.")
+  equal("and has a key of seven kinds of dot", #map.key, 7)
+  equal("which begins with the capitals", map.key[1].text, "Capital")
 
   -- A click on a place goes there from where the character stands.
   stub.state.map = 1454
@@ -187,12 +189,39 @@ return function(t)
   equal("the gold ring is on the destination", map.goal.node, "place:undercity")
   equal("shown", map.goal:IsShown(), true)
   equal("the green ring is where the trip starts", map.here.node, "place:orgrimmar")
+  equal("and says so", map.hereText.text, "You are here")
+  equal("the From box's caption says where the trip starts", window.fromCaption.text, "From (where you stand: Orgrimmar)")
 
   -- A right-click starts from the place.
   map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "RightButton")
   equal("a right-click on a place starts the trip there", window.heading.text, "Booty Bay to Undercity (On foot)")
   equal("and writes its name in the From box", window.from.text, "Booty Bay")
   equal("the green ring moves to it", map.here.node, "place:bootybay")
+  equal("and is named the start", map.hereText.text, "Start")
+  equal("the caption is plain once a start is picked", window.fromCaption.text, "From")
+
+  -- One place is never both ends.
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "LeftButton")
+  equal("a click on the start makes it the destination", window.to.text, "Booty Bay")
+  equal("and the start goes back to where the character stands", window.from.text, "")
+  equal("so the trip is from there", window.heading.text, "Orgrimmar to Booty Bay (On foot)")
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "RightButton")
+  equal("a right-click on the destination makes it the start", window.from.text, "Booty Bay")
+  equal("and the destination is asked for again", window.to.text, "")
+  equal("in words", window.heading.text, "Click a place on the map, or type where you want to go.")
+  map.pins.undercity.scripts.OnClick(map.pins.undercity, "LeftButton")
+  equal("the next click completes the trip", window.heading.text, "Booty Bay to Undercity (On foot)")
+
+  -- Clear puts the window back as it opened.
+  click(window.clear)
+  equal("Clear empties the From box", window.from.text, "")
+  equal("and the To box", window.to.text, "")
+  equal("and asks where to", window.heading.text, "Where to?")
+  equal("with no way drawn", map.routeShown, 0)
+  equal("no gold ring", map.goal:IsShown(), false)
+  equal("and the green ring back where the character stands", map.here.node, "place:orgrimmar")
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "RightButton")
+  map.pins.undercity.scripts.OnClick(map.pins.undercity, "LeftButton")
 
   -- A zone's name can be picked too.
   map.zones.westfall.scripts.OnClick(map.zones.westfall, "LeftButton")
@@ -264,8 +293,9 @@ return function(t)
   local button = EW.minimapButton
   equal("and shows it", button:IsShown(), true)
   equal("anchored to the minimap", button.point[2], _G.Minimap)
-  equal("its icon is the site's own mark", button.icon.texture, "Interface\\AddOns\\EverythingWoW\\Media\\icon")
-  equal("under the game's own ring", button.ring.texture, "Interface\\Minimap\\MiniMap-TrackingBorder")
+  equal("it is one picture, the site's mark cut round with its rim", button.icon.texture, "Interface\\AddOns\\EverythingWoW\\Media\\minimap")
+  check("set in the middle of the button", button.icon.point[1] == "CENTER" and button.icon.point[2] == button and button.icon.point[4] == 0 and button.icon.point[5] == 0)
+  equal("with no ring apart from it to fall out of line", button.ring, nil)
   equal("with no size to read it sits 80 from the middle", EW.MinimapRadius(), 80)
   _G.Minimap.GetWidth = function() return 140 end
   equal("on a minimap 140 wide it sits 75 from the middle, just past the edge", EW.MinimapRadius(), 75)
@@ -357,8 +387,8 @@ return function(t)
   equal("and the ring still marks the destination", linelessMap.goal.node, "place:undercity")
   rawset(_G, "EW_TEST_NO_LINES", nil)
 
-  -- The three pictures the addon ships, as the game reads them.
-  for _, picture in ipairs({ { "icon", 64 }, { "dot", 16 }, { "ring", 32 } }) do
+  -- The pictures the addon ships, as the game reads them.
+  for _, picture in ipairs({ { "icon", 64 }, { "minimap", 64 }, { "dot", 16 }, { "ring", 32 } }) do
     local handle = io.open(t.root .. "Media/" .. picture[1] .. ".tga", "rb")
     check("Media/" .. picture[1] .. ".tga is shipped", handle ~= nil)
     if handle then
