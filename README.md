@@ -6,6 +6,13 @@ This is version 0.2.6. It is free and open source under the MIT license.
 
 ## Changes
 
+**0.3.1** times the flights you take. The site's map knows how long 195 Classic flights take, measured by players long ago, and can only guess at every flight master new in WoW Forever. Now each flight you take from end to end is written down, so the guesses can be replaced by what the flight really took.
+
+- **`Flights.lua`.** One flight is one observation of the kind `flight`: where you stood when you opened the flight master's map, the two flight points as the game's flight map names them, the seconds from takeoff to landing to a tenth, the faction whose network it is, and where you landed. Nothing else of the player is in it.
+- **Only whole flights.** A flight is written only when it was seen from the pick on the flight map to the landing. One ended early with the request to land, one a loading screen cut, anything under five seconds or over half an hour, and a loss of control the client never called a taxi are left out.
+- **No new request.** The recorder reads what the flight map already shows and listens for the takeoff and the landing. Where the client offers no way to learn the destination picked, it registers nothing and writes nothing.
+- **The version and the tests.** Both tables of contents list `Flights.lua` and carry `## Version: 0.3.1`. The tests fly a plain flight, one with a stop on the way, and each kind that must not be written, and the site's own reader accepts a file holding a flight; the suite reads 2,635 assertions, from 2,596, under Lua 5.1 and 5.4.
+
 **0.3.0** brings everythingwow.com's route planner into the game. `/ewow route Booty Bay` plans the trip from where your character stands, and `/ewow route Orgrimmar > Undercity` plans it between any two places: the steps in order, and how long the trip takes as a low, a usual and a high time. It is the first part of the travel features; the route on the world map comes next.
 
 - **The site's own planner.** `Travel.lua` is the planner behind the site's WoW Forever map, written again in Lua, and `TravelData.lua` is the site's own map data: 46 zones, 127 places, 49 land crossings, 15 boats, zeppelins, trams and portals, and 195 measured flight times. `tools/gen_travel_data.py` writes that file from the site's files, so the game and the website answer the same trip the same way.
@@ -194,6 +201,7 @@ The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A r
 | Your character | Once on login, after the client has loaded your gear and currencies, and on `/ewow snapshot`: your gear per slot, talents, professions, reputations, and currencies. After that, only when an hour has passed and your gear or your level has changed. |
 | Your class's talent trees | Only on `/ewow talents`: every tree and talent of your class, with each talent's place, maximum rank and prerequisite, kept apart from the observations. |
 | Auction rows | From a search you ran yourself, never from a scan of the addon's own: the addon never sends a query to Blizzard. On a client with the classic auction list, such as Classic Era and Hardcore, each row's item, quantity, and price. On Forever, and on a classic client whose auction house is `C_AuctionHouse`, from 0.2.6: each browse row's item, lowest price and total quantity, each commodity listing's unit price and quantity, and each item auction's buyout and quantity. Retail is skipped entirely, because Blizzard's own auction API is what the site reads there. |
+| Flights | When a flight you took lands: the two flight points, how many seconds it took, the faction whose network it is, and where you took off and landed. Only a flight seen from end to end. |
 | New WoW Forever items | On WoW Forever only, the first time you meet an item with an id of 200,000 or more that the site does not already have from Blizzard, at the auction house, in loot, at a vendor or in a quest's rewards: the item's name, quality, levels, kind, slot, stack size, vendor price, binding, base stats and use spell, as the client's item cache gives them for the bare item. Once per item per fourteen days, at most 400 in a session, and with no map or position. |
 
 ## What is never recorded
