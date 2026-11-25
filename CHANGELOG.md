@@ -2,6 +2,15 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.4.1** times the boats, zeppelins and the tram. The site's map guesses how long each line takes; now each ride you take is written down, as each flight already is, so the guesses can be replaced by what the ride really took.
+
+- **`Rides.lua`.** One ride is one observation of the new kind `transit`: where it began, the seconds from setting off to coming to rest to a tenth, your faction, where it ended, and how many loading screens it passed through. Nothing else of the player is in it.
+- **How a ride is told.** On a boat your character stands still and yet moves over the ground fast. Twice a second the addon compares how far the character has moved in the world with how fast it is moving on its own feet; a good deal faster than its own speed, for a few looks running, is a ride, and it ends when that stops for a few seconds. A boat that calls at a dock on its way is one ride for each leg.
+- **What is left out.** A flight, which the flight recorder times; anything inside an instance; a ride under half a minute or over a quarter of an hour; and one that ends where it began with no loading screen between.
+- **WoW Forever alone.** The recorder starts only there, where the planner's lines are, and only where the client gives the character's position, its speed and a ticker. A look the client will not answer is passed over.
+- **The site.** everythingwow.com takes the kind in from its build of 25 November 2026, and its upload page counts it as Transport Rides; the window's Recorded page uses the same words.
+- **The version and the tests.** Both tables of contents list `Rides.lua` and carry `## Version: 0.4.1`. The tests ride a plain crossing, one through a loading screen, one that ends with it, and each kind that must not be written, then stand in for the client and look at it as the ticker does; the site's own reader accepts a file holding a ride. The suite reads 2,983 assertions, from 2,931, under Lua 5.1 and 5.4.
+
 **0.4.0** shows the game's own map in the window. The drawn map of 0.3.3 did not match the map players know, so the Route page now shows the real one.
 
 - **The real map.** The window shows a continent at a time, in the game's own pictures, asked of the client by the continent's number and laid out as the client lays them out. A button for each continent sits in the corner, and the window opens on the continent you are on.

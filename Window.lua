@@ -53,6 +53,7 @@ local KIND_LABELS = {
   rare = "Rare Sightings",
   character_snapshot = "Character Snapshots",
   item = "Items",
+  transit = "Transport Rides",
 }
 
 -- How each kind of place is drawn on the map: its size, its color, the

@@ -2,9 +2,18 @@
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.4.0. It is free and open source under the MIT license.
+This is version 0.4.1. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.4.1** times the boats, zeppelins and the tram. The site's map guesses how long each line takes; now each ride you take is written down, as each flight already is, so the guesses can be replaced by what the ride really took.
+
+- **`Rides.lua`.** One ride is one observation of the new kind `transit`: where it began, the seconds from setting off to coming to rest to a tenth, your faction, where it ended, and how many loading screens it passed through. Nothing else of the player is in it.
+- **How a ride is told.** On a boat your character stands still and yet moves over the ground fast. Twice a second the addon compares how far the character has moved in the world with how fast it is moving on its own feet; a good deal faster than its own speed, for a few looks running, is a ride, and it ends when that stops for a few seconds. A boat that calls at a dock on its way is one ride for each leg.
+- **What is left out.** A flight, which the flight recorder times; anything inside an instance; a ride under half a minute or over a quarter of an hour; and one that ends where it began with no loading screen between.
+- **WoW Forever alone.** The recorder starts only there, where the planner's lines are, and only where the client gives the character's position, its speed and a ticker. A look the client will not answer is passed over.
+- **The site.** everythingwow.com takes the kind in from its build of 25 November 2026, and its upload page counts it as Transport Rides; the window's Recorded page uses the same words.
+- **The version and the tests.** Both tables of contents list `Rides.lua` and carry `## Version: 0.4.1`. The tests ride a plain crossing, one through a loading screen, one that ends with it, and each kind that must not be written, then stand in for the client and look at it as the ticker does; the site's own reader accepts a file holding a ride. The suite reads 2,983 assertions, from 2,931, under Lua 5.1 and 5.4.
 
 **0.4.0** shows the game's own map in the window. The drawn map of 0.3.3 did not match the map players know, so the Route page now shows the real one.
 
@@ -239,6 +248,7 @@ The source lives at <https://github.com/DustinSartoris/everythingwow-addon>. A r
 | Your character | Once on login, after the client has loaded your gear and currencies, and on `/ewow snapshot`: your gear per slot, talents, professions, reputations, and currencies. After that, only when an hour has passed and your gear or your level has changed. |
 | Your class's talent trees | Only on `/ewow talents`: every tree and talent of your class, with each talent's place, maximum rank and prerequisite, kept apart from the observations. |
 | Auction rows | From a search you ran yourself, never from a scan of the addon's own: the addon never sends a query to Blizzard. On a client with the classic auction list, such as Classic Era and Hardcore, each row's item, quantity, and price. On Forever, and on a classic client whose auction house is `C_AuctionHouse`, from 0.2.6: each browse row's item, lowest price and total quantity, each commodity listing's unit price and quantity, and each item auction's buyout and quantity. Retail is skipped entirely, because Blizzard's own auction API is what the site reads there. |
+| Boat, zeppelin and tram rides | On WoW Forever, when a ride you took comes to rest: where it began and ended, how many seconds it took, your faction, and how many loading screens it passed through. |
 | Flights | When a flight you took lands: the two flight points, how many seconds it took, the faction whose network it is, and where you took off and landed. Only a flight seen from end to end. |
 | New WoW Forever items | On WoW Forever only, the first time you meet an item with an id of 200,000 or more that the site does not already have from Blizzard, at the auction house, in loot, at a vendor or in a quest's rewards: the item's name, quality, levels, kind, slot, stack size, vendor price, binding, base stats and use spell, as the client's item cache gives them for the bare item. Once per item per fourteen days, at most 400 in a session, and with no map or position. |
 

@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.4.0"
+EW.ADDON_VERSION = "0.4.1"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -49,7 +49,7 @@ EW.DEDUPE_SECONDS = 300
 EW.KINDS = {
   "npc", "object", "quest_start", "quest_end", "objective", "loot",
   "vendor", "trainer", "flight", "auction", "rare", "character_snapshot",
-  "item",
+  "item", "transit",
 }
 
 local KIND_SET = {}
