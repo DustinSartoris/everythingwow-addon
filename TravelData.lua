@@ -86,14 +86,14 @@ T.PLACES = {
   { key = "southshore", name = "Southshore", kind = "harbor", zone = "hillsbrad", x = 1717.8, y = 534.6, faction = "alliance", fm = "alliance", isNew = true },
   { key = "swharbor", name = "Stormwind Harbor", kind = "harbor", zone = "elwynn", x = 1619, y = 1037.2, faction = "alliance", isNew = true },
   { key = "bootybay", name = "Booty Bay", kind = "harbor", zone = "stv", x = 1730, y = 1433.4, faction = "neutral", fm = "both" },
-  { key = "powderfuse", name = "Powderfuse Port", kind = "harbor", zone = "riverglades", x = 2095.6, y = 1090.4, faction = "neutral", fm = "alliance", isNew = true },
+  { key = "powderfuse", name = "Powderfuse Port", kind = "harbor", zone = "riverglades", x = 2095.6, y = 1090.4, faction = "neutral", isNew = true },
   { key = "farholde", name = "Farholde Keep", kind = "town", zone = "riverglades", x = 2015, y = 1129.6, faction = "alliance", fm = "alliance", isNew = true },
   { key = "rogmar", name = "Rog'mar", kind = "town", zone = "riverglades", x = 2053.8, y = 1003.6, faction = "horde", fm = "horde", isNew = true },
   { key = "sunnyglade", name = "Sunnyglade", kind = "landmark", zone = "riverglades", x = 2041.6, y = 1112.8, isNew = true },
   { key = "bolderok", name = "Bolder'ok", kind = "landmark", zone = "riverglades", x = 2067.4, y = 1040, isNew = true },
   { key = "eternity", name = "Summit of Eternity", kind = "town", zone = "hyjal", x = 654.8, y = 485, fm = "both", isNew = true },
   { key = "taintedfoot", name = "Tainted Foothills", kind = "town", zone = "hyjal", x = 587.6, y = 511.3, fm = "both", isNew = true },
-  { key = "tidegear", name = "Tidegear Coast", kind = "town", zone = "dunmorogh", x = 1646.4, y = 796.4, faction = "alliance", fm = "alliance", isNew = true },
+  { key = "tidegear", name = "Tidegear Coast", kind = "town", zone = "dunmorogh", x = 1646.4, y = 796.4, faction = "alliance", isNew = true },
   { key = "uczep", name = "Tirisfal zeppelin towers", kind = "zeppelin_tower", zone = "tirisfal", x = 1711.8, y = 247.6, faction = "horde" },
   { key = "gromgol", name = "Grom'gol Base Camp", kind = "zeppelin_tower", zone = "stv", x = 1704.2, y = 1308.8, faction = "horde", fm = "horde" },
   { key = "dolanaar", name = "Dolanaar", kind = "town", zone = "teldrassil", x = 398, y = 118.8, faction = "alliance" },
@@ -182,7 +182,7 @@ T.PLACES = {
   { key = "city-of-dalaran", name = "City of Dalaran", kind = "dungeon", zone = "alterac", x = 1657, y = 384.8, isNew = true },
   { key = "the-drowned-city", name = "The Drowned City", kind = "dungeon", zone = "stv", x = 1670.7, y = 1384.4, isNew = true },
   { key = "kroldok-stronghold", name = "Krol'dok Stronghold", kind = "dungeon", zone = "riverglades", x = 2023.4, y = 1059.6, isNew = true },
-  { key = "alcaz-island-prison", name = "Alcaz Prison", kind = "dungeon", zone = "dustwallow", x = 810, y = 987.5, isNew = true },
+  { key = "alcaz-island-prison", name = "Alcaz Island Prison", kind = "dungeon", zone = "dustwallow", x = 810, y = 987.5, isNew = true },
   { key = "blackmaw-hold", name = "Blackmaw Hold", kind = "dungeon", zone = "azshara", x = 741.2, y = 502.5, isNew = true },
   { key = "shapers-terrace", name = "Shaper's Terrace", kind = "dungeon", zone = "ungoro", x = 502.8, y = 1235, isNew = true },
   { key = "hyjal-summit", name = "Hyjal Summit", kind = "raid", zone = "hyjal", x = 646, y = 470, isNew = true },
@@ -251,6 +251,7 @@ T.CITY_LINKS = {
   { from = "orgzep", to = "orgrimmar", crossing = "the front gate" },
   { from = "uczep", to = "undercity", crossing = "the ruins of Lordaeron" },
   { from = "rutheran", to = "darnassus", crossing = "the portal at the foot of the tree", fixed = 30, verb = "Head to" },
+  { from = "theramore", to = "ratchet", crossing = "the beach north of Theramore", faction = "alliance", walkFactor = 1.4, caution = "Murlocs of level 37 to 38 hold the beach: swim around them." },
 }
 
 T.ROUTES = {
@@ -494,6 +495,8 @@ T.MODEL = {
   flightLinks = {
     taintedfoot = { "everlook", "eternity" },
     eternity = { "taintedfoot" },
+    farholde = { "lakeshire", "morgans-vigil", "thelsamar" },
+    rogmar = { "stonard", "hammerfall", "kargath", "flame-crest" },
   },
   seaPenalty = 240,
   enemyZonePenalty = 600,

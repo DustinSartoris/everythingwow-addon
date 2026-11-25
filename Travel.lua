@@ -280,17 +280,28 @@ local function BuildGraph(options)
     end
   end
 
-  -- City: the links inside a city, a fixed one paying its own cost.
+  -- City: the links inside a city, a fixed one paying its own cost. A way
+  -- one faction alone may take is no way for the other, and a walked way's
+  -- time is the walk's own, scaled.
   for _, link in ipairs(T.CITY_LINKS) do
     local from, to = PLACE[link.from], PLACE[link.to]
-    if from and to then
+    if from and to and (link.faction == nil or link.faction == options.faction) then
+      local units = Distance(from, to)
       local weight = link.fixed
-      if weight == nil then weight = EntrySeconds(Distance(from, to), speed, from.zone) end
+      if weight == nil then
+        if link.walkFactor then
+          weight = WalkSeconds(units, speed, from.zone) * link.walkFactor
+        else
+          weight = EntrySeconds(units, speed, from.zone)
+        end
+      end
       Join(PlaceNode(link.from), PlaceNode(link.to), weight, {
         family = "city",
         crossing = link.crossing,
         verb = link.verb,
         fixedSeconds = link.fixed,
+        walkFactor = link.walkFactor,
+        caution = link.caution,
       })
     end
   end
@@ -500,7 +511,7 @@ local function StepOf(from, to, edge)
   if detail.family == "land" then
     step.what, step.claim, step.caution = detail.crossing, detail.claim, detail.caution
   elseif detail.family == "city" then
-    step.what, step.verb = detail.crossing, detail.verb
+    step.what, step.verb, step.caution = detail.crossing, detail.verb, detail.caution
   elseif detail.family == "ride" then
     step.routeKey, step.what, step.claim = detail.routeKey, detail.note, detail.claim
     step.waitMin, step.waitMax = detail.waitMin, detail.waitMax
@@ -561,7 +572,7 @@ local function Retime(path, input, factor)
         step.seconds = detail.fixedSeconds
         fixed = fixed + step.seconds
       else
-        step.seconds = math.max(M.entryMinimum, walked)
+        step.seconds = math.max(M.entryMinimum, walked * (detail.walkFactor or 1))
         land = land + step.seconds
       end
     else

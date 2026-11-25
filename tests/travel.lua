@@ -194,6 +194,41 @@ return function(t)
   check("in one line", stub.state.printed[1]:find("covers WoW Forever only", 1, true) ~= nil, stub.state.printed[1])
   stub.state.printed = {}
 
+  -- The beach north of Theramore is the Alliance's way alone, walked and
+  -- with its warning; the Horde is never offered it.
+  local function beach(faction)
+    local plan = Travel.Plan({ from = "place:theramore", to = "place:ratchet", faction = faction, speed = "foot", flightPaths = false, skyborne = false })
+    if not plan.ok then return nil, plan end
+    for _, step in ipairs(plan.steps) do
+      if step.family == "city" and step.what == "the beach north of Theramore" then return step, plan end
+    end
+    return nil, plan
+  end
+  local crossing, alliancePlan = beach("alliance")
+  check("the Alliance walks the beach from Theramore to Ratchet", crossing ~= nil and #alliancePlan.steps == 1)
+  equal("with the warning on the step", crossing and crossing.caution, "Murlocs of level 37 to 38 hold the beach: swim around them.")
+  equal("and in its line", crossing and Travel.StepLine(crossing),
+    "Theramore Isle to Ratchet, the beach north of Theramore, Murlocs of level 37 to 38 hold the beach: swim around them, 7 min")
+  local hordeCrossing, hordePlan = beach("horde")
+  check("the Horde is not offered the beach", hordeCrossing == nil and hordePlan.ok == true)
+
+  -- The two Riverglades flight masters fly only where players have seen them fly.
+  local function flightsFrom(plan, name)
+    local found = {}
+    for _, step in ipairs(plan.steps) do
+      if step.family == "flight" and (step.from == name or step.to == name) then
+        found[#found + 1] = step.from == name and step.to or step.from
+      end
+    end
+    return table.concat(found, ", ")
+  end
+  local toFarholde = Travel.Plan({ from = "place:orgrimmar", to = "place:farholde", faction = "alliance", speed = "foot", flightPaths = true, skyborne = false })
+  equal("Farholde Keep is reached by flight from Lakeshire", toFarholde.ok and flightsFrom(toFarholde, "Farholde Keep"), "Lakeshire")
+  local toRogmar = Travel.Plan({ from = "place:undercity", to = "place:rogmar", faction = "horde", speed = "foot", flightPaths = true, skyborne = false })
+  equal("Rog'mar by flight from Hammerfall", toRogmar.ok and flightsFrom(toRogmar, "Rog'mar"), "Hammerfall")
+  local toPowderfuse = Travel.Plan({ from = "place:stormwind", to = "place:powderfuse", faction = "alliance", speed = "foot", flightPaths = true, skyborne = false })
+  equal("no flight lands at Powderfuse Port, which has no flight master yet", toPowderfuse.ok and flightsFrom(toPowderfuse, "Powderfuse Port"), "")
+
   -- The planner changes nothing it was given.
   local input = { from = "place:orgrimmar", to = "zone:westfall", faction = "horde", speed = "foot", flightPaths = true, skyborne = false }
   local first = Travel.Plan(input)

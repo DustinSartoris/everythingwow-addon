@@ -105,6 +105,10 @@ for c in links:
     w("  " + row([
         ("from", lua(c["from_key"])), ("to", lua(c["to_key"])), ("crossing", lua(c["crossing"])),
         ("fixed", "nil" if c["fixed_seconds"] is None else num(c["fixed_seconds"])), ("verb", lua(c["verb"])),
+        # A way one faction alone may take, walked rather than a step inside a city.
+        ("faction", lua(c.get("faction"))),
+        ("walkFactor", "nil" if c.get("walk_factor") is None else num(c["walk_factor"])),
+        ("caution", lua(c.get("caution"))),
     ]) + ",")
 w("}")
 w("")
