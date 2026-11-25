@@ -1,0 +1,515 @@
+{
+ "_about": "Where a place stands on its zone's own map in the game, in percent from the top left: [zone key, x, y]. Facts, keyed by this addon's own place keys; 102 of the 127 places. A place not listed here has only its drawn spot on the site's map.",
+ "places": {
+  "aerie-peak": [
+   "hinterlands",
+   11.1,
+   46.2
+  ],
+  "ahnqiraj": [
+   "silithus",
+   28.8,
+   92.9
+  ],
+  "alcaz-island-prison": [
+   "dustwallow",
+   75.5,
+   18.3
+  ],
+  "astranaar": [
+   "ashenvale",
+   34.4,
+   48.0
+  ],
+  "auberdine": [
+   "darkshore",
+   36.3,
+   45.6
+  ],
+  "blackfathom-deeps": [
+   "ashenvale",
+   15.4,
+   15.6
+  ],
+  "blackmaw-hold": [
+   "azshara",
+   37.5,
+   31.8
+  ],
+  "blackrock-mountain": [
+   "searinggorge",
+   34.5,
+   84.0
+  ],
+  "bloodhoof-village": [
+   "mulgore",
+   50.0,
+   61.5
+  ],
+  "bootybay": [
+   "stv",
+   26.9,
+   77.1
+  ],
+  "brackenwall-village": [
+   "dustwallow",
+   35.6,
+   31.9
+  ],
+  "brill": [
+   "tirisfal",
+   60.1,
+   51.8
+  ],
+  "camp-mojache": [
+   "feralas",
+   75.4,
+   44.4
+  ],
+  "camp-taurajo": [
+   "barrens",
+   44.4,
+   59.2
+  ],
+  "caverns-of-time": [
+   "tanaris",
+   64.9,
+   49.7
+  ],
+  "cenarion-hold": [
+   "silithus",
+   48.7,
+   36.7
+  ],
+  "chillwind-camp": [
+   "wpl",
+   52.4,
+   82.7
+  ],
+  "city-of-dalaran": [
+   "alterac",
+   14.7,
+   60.6
+  ],
+  "dalaran": [
+   "alterac",
+   12.5,
+   51.8
+  ],
+  "darkshire": [
+   "duskwood",
+   74.7,
+   46.2
+  ],
+  "darkwhisper-gorge": [
+   "winterspring",
+   57.5,
+   82.3
+  ],
+  "darnassus": [
+   "teldrassil",
+   25.4,
+   55.3
+  ],
+  "dire-maul": [
+   "feralas",
+   58.0,
+   44.5
+  ],
+  "dolanaar": [
+   "teldrassil",
+   56.2,
+   59.6
+  ],
+  "eternity": [
+   "hyjal",
+   68.6,
+   44.1
+  ],
+  "everlook": [
+   "winterspring",
+   60.5,
+   36.3
+  ],
+  "excavation-site": [
+   "wetlands",
+   47.7,
+   56.4
+  ],
+  "farholde": [
+   "riverglades",
+   60.6,
+   81.6
+  ],
+  "feathermoon": [
+   "feralas",
+   30.2,
+   43.2
+  ],
+  "flame-crest": [
+   "burningsteppes",
+   65.7,
+   24.2
+  ],
+  "freewind-post": [
+   "needles",
+   45.1,
+   49.1
+  ],
+  "gadgetzan": [
+   "tanaris",
+   50.1,
+   28.1
+  ],
+  "gates-of-uldum": [
+   "tanaris",
+   36.5,
+   77.6
+  ],
+  "gnomeregan": [
+   "dunmorogh",
+   24.3,
+   40.4
+  ],
+  "goldshire": [
+   "elwynn",
+   42.0,
+   65.9
+  ],
+  "grim-batol": [
+   "wetlands",
+   73.0,
+   71.3
+  ],
+  "gromgol": [
+   "stv",
+   32.5,
+   29.4
+  ],
+  "hall-of-thanes": [
+   "dunmorogh",
+   50.6,
+   34.0
+  ],
+  "hammerfall": [
+   "arathi",
+   73.0,
+   32.7
+  ],
+  "ironforge": [
+   "dunmorogh",
+   52.5,
+   36.0
+  ],
+  "kargath": [
+   "badlands",
+   4.0,
+   44.8
+  ],
+  "kharanos": [
+   "dunmorogh",
+   45.5,
+   50.7
+  ],
+  "lakeshire": [
+   "redridge",
+   28.4,
+   45.2
+  ],
+  "lights-hope-chapel": [
+   "epl",
+   80.2,
+   57.0
+  ],
+  "maraudon": [
+   "desolace",
+   31.5,
+   62.4
+  ],
+  "marshals-refuge": [
+   "ungoro",
+   45.2,
+   5.8
+  ],
+  "menethil": [
+   "wetlands",
+   9.5,
+   59.7
+  ],
+  "morgans-vigil": [
+   "burningsteppes",
+   84.3,
+   68.3
+  ],
+  "nethergarde-keep": [
+   "blastedlands",
+   63.8,
+   16.5
+  ],
+  "nighthaven": [
+   "moonglade",
+   48.1,
+   67.3
+  ],
+  "nijels-point": [
+   "desolace",
+   64.7,
+   10.5
+  ],
+  "onyxias-lair": [
+   "dustwallow",
+   52.3,
+   76.0
+  ],
+  "orgrimmar": [
+   "durotar",
+   45.5,
+   13.0
+  ],
+  "orgzep": [
+   "durotar",
+   50.7,
+   13.2
+  ],
+  "ragefire-chasm": [
+   "durotar",
+   46.1,
+   -0.3
+  ],
+  "ratchet": [
+   "barrens",
+   63.1,
+   37.2
+  ],
+  "razor-hill": [
+   "durotar",
+   53.9,
+   44.2
+  ],
+  "razorfen-downs": [
+   "barrens",
+   48.6,
+   91.4
+  ],
+  "razorfen-kraul": [
+   "barrens",
+   42.6,
+   89.8
+  ],
+  "refuge-pointe": [
+   "arathi",
+   45.7,
+   46.1
+  ],
+  "revantusk-village": [
+   "hinterlands",
+   77.6,
+   80.0
+  ],
+  "rogmar": [
+   "riverglades",
+   59.6,
+   45.1
+  ],
+  "ruins-of-lordaeron": [
+   "tirisfal",
+   64.8,
+   67.4
+  ],
+  "rutheran": [
+   "teldrassil",
+   55.7,
+   90.0
+  ],
+  "scarlet-monastery": [
+   "tirisfal",
+   82.1,
+   39.2
+  ],
+  "scholomance": [
+   "wpl",
+   69.5,
+   74.5
+  ],
+  "sentinel-hill": [
+   "westfall",
+   56.6,
+   52.6
+  ],
+  "shadowfang-keep": [
+   "silverpine",
+   43.2,
+   67.1
+  ],
+  "shadowprey-village": [
+   "desolace",
+   25.0,
+   69.3
+  ],
+  "skywatcher": [
+   "mulgore",
+   34.3,
+   26.1
+  ],
+  "southshore": [
+   "hillsbrad",
+   49.5,
+   58.8
+  ],
+  "splintertree-post": [
+   "ashenvale",
+   73.2,
+   61.6
+  ],
+  "stonard": [
+   "swamp",
+   46.1,
+   54.8
+  ],
+  "stonetalon-peak": [
+   "stonetalon",
+   37.1,
+   11.7
+  ],
+  "stormwind": [
+   "elwynn",
+   32.1,
+   49.9
+  ],
+  "stratholme": [
+   "epl",
+   30.9,
+   16.6
+  ],
+  "sun-rock-retreat": [
+   "stonetalon",
+   45.1,
+   59.8
+  ],
+  "sunken-temple": [
+   "swamp",
+   69.1,
+   54.7
+  ],
+  "taintedfoot": [
+   "hyjal",
+   55.1,
+   82.5
+  ],
+  "talonbranch-glade": [
+   "felwood",
+   62.5,
+   24.2
+  ],
+  "talrendis-point": [
+   "azshara",
+   11.9,
+   77.6
+  ],
+  "tarren-mill": [
+   "hillsbrad",
+   62.7,
+   19.8
+  ],
+  "thalanaar": [
+   "feralas",
+   89.5,
+   45.9
+  ],
+  "the-crossroads": [
+   "barrens",
+   51.5,
+   30.3
+  ],
+  "the-dark-portal": [
+   "blastedlands",
+   58.6,
+   57.2
+  ],
+  "the-deadmines": [
+   "westfall",
+   41.6,
+   72.4
+  ],
+  "the-drowned-city": [
+   "stv",
+   16.6,
+   59.2
+  ],
+  "the-sepulcher": [
+   "silverpine",
+   42.5,
+   40.6
+  ],
+  "the-stockade": [
+   "elwynn",
+   21.3,
+   37.6
+  ],
+  "thelsamar": [
+   "lochmodan",
+   34.8,
+   46.6
+  ],
+  "theramore": [
+   "dustwallow",
+   67.5,
+   51.3
+  ],
+  "thorium-point": [
+   "searinggorge",
+   36.3,
+   26.4
+  ],
+  "thunderbluff": [
+   "mulgore",
+   39.4,
+   27.0
+  ],
+  "uczep": [
+   "tirisfal",
+   61.3,
+   59.0
+  ],
+  "uldaman": [
+   "badlands",
+   42.5,
+   14.0
+  ],
+  "undercity": [
+   "tirisfal",
+   61.7,
+   62.0
+  ],
+  "valanaar": [
+   "zephras",
+   65.8,
+   83.3
+  ],
+  "valormok": [
+   "azshara",
+   22.0,
+   49.6
+  ],
+  "wailing-caverns": [
+   "barrens",
+   47.0,
+   35.6
+  ],
+  "zoramgar-outpost": [
+   "ashenvale",
+   12.2,
+   33.8
+  ],
+  "zulfarrak": [
+   "tanaris",
+   38.7,
+   19.3
+  ],
+  "zulgurub": [
+   "stv",
+   53.5,
+   17.2
+  ]
+ }
+}
