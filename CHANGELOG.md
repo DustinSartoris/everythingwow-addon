@@ -2,6 +2,16 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.3.2** gives the Companion a window. `/ewow` opens it, and so does a new button on the minimap. Until now everything the addon did was a chat command; every command still works.
+
+- **The Route page.** Two boxes, From and To, a speed button and Plan Route. Leave From empty and the trip starts where your character stands. The answer is the planner's own, the one `/ewow route` prints: the trip, the estimate and the steps in order, eight to a page. A click on the speed button goes round the four speeds and plans the trip again. WoW Forever only, like the planner; on any other client the window opens on the Recorded page.
+- **The Recorded page.** What the file holds now, kind by kind, in the words the site's upload page uses, how many observations were dropped to keep the file small, where the file is written and where to upload it. On every client.
+- **Deals.** A third button opens the list of auctions under vendor price, which keeps its own window.
+- **The minimap button.** A click opens or closes the window, and a drag moves the button round the minimap's edge. `/ewow minimap` hides it or shows it again. Whether it is hidden and where it sits are the two things the window saves.
+- **The commands.** `/ewow` alone opens the window, where it used to print the status. `/ewow status` prints the status as before, and `/ewow route` with no place opens the Route page. On a client where the window cannot be built, `/ewow` prints the status as it always did.
+- **Nothing new is read.** The window shows what the commands show, and it records nothing.
+- **The version and the tests.** Both tables of contents list `Window.lua` and carry `## Version: 0.3.2`. The tests open the window on a stand in for the client's frames, type a trip, page through it, change the speed, read the Recorded page, click and drag the minimap button, and load a client that cannot build the window; the suite reads 2,717 assertions, from 2,635, under Lua 5.1 and 5.4.
+
 **0.3.1** times the flights you take. The site's map knows how long 195 Classic flights take, measured by players long ago, and can only guess at every flight master new in WoW Forever. Now each flight you take from end to end is written down, so the guesses can be replaced by what the flight really took.
 
 - **`Flights.lua`.** One flight is one observation of the kind `flight`: where you stood when you opened the flight master's map, the two flight points as the game's flight map names them, the seconds from takeoff to landing to a tenth, the faction whose network it is, and where you landed. Nothing else of the player is in it.

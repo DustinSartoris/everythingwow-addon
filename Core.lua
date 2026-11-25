@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.3.1"
+EW.ADDON_VERSION = "0.3.2"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -1259,8 +1259,14 @@ function EW.SlashCommand(message)
   local text = tostring(message or "")
   local command = string.lower(string.match(text, "^%s*(%S*)") or "")
   local rest = string.match(text, "^%s*%S*%s*(.-)%s*$") or ""
-  if command == "status" or command == "" then
+  if command == "" or command == "show" or command == "window" then
+    -- Window.lua's window, from 0.3.2. A client that cannot build it gets
+    -- the status lines a bare /ewow always printed.
+    if not (EW.ShowWindow and EW.ShowWindow()) then Status() end
+  elseif command == "status" then
     Status()
+  elseif command == "minimap" then
+    if EW.MinimapCommand then EW.MinimapCommand() end
   elseif command == "clear" then
     Clear()
   elseif command == "snapshot" then
@@ -1289,9 +1295,11 @@ function EW.SlashCommand(message)
     if EW.DealsCommand then EW.DealsCommand(rest) end
   elseif command == "route" then
     -- Travel.lua's planner, from 0.3.0: the site's own route planner, in the game.
+    -- With no place named, the window's Route page, where there is a window.
+    if rest == "" and EW.ShowWindow and EW.ShowWindow("route") then return end
     if EW.Travel and EW.Travel.Command then EW.Travel.Command(rest) end
   else
-    EW.Print("Commands: /ewow status, /ewow deals, /ewow route <place>, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off, /ewow talents, /ewow talents clear.")
+    EW.Print("Commands: /ewow (the window), /ewow status, /ewow deals, /ewow route <place>, /ewow minimap, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off, /ewow talents, /ewow talents clear.")
   end
 end
 

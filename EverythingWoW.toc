@@ -2,7 +2,7 @@
 ## Title: Everything WoW Companion
 ## Notes: Records NPCs, objects, quests, vendors, loot, and your own character so everythingwow.com can build what Blizzard's API leaves out. Upload the saved file at everythingwow.com/addons/companion/upload.
 ## Author: Everything WoW
-## Version: 0.3.1
+## Version: 0.3.2
 ## SavedVariables: EverythingWoWDB, EverythingWoWTalentsDB
 ## X-License: MIT
 ## X-Website: https://everythingwow.com/addons/companion
@@ -26,3 +26,4 @@ Auction.lua
 Deals.lua
 TravelData.lua
 Travel.lua
+Window.lua

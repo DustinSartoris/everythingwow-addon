@@ -2,9 +2,19 @@
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.2.6. It is free and open source under the MIT license.
+This is version 0.3.2. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.3.2** gives the Companion a window. `/ewow` opens it, and so does a new button on the minimap. Until now everything the addon did was a chat command; every command still works.
+
+- **The Route page.** Two boxes, From and To, a speed button and Plan Route. Leave From empty and the trip starts where your character stands. The answer is the planner's own, the one `/ewow route` prints: the trip, the estimate and the steps in order, eight to a page. A click on the speed button goes round the four speeds and plans the trip again. WoW Forever only, like the planner; on any other client the window opens on the Recorded page.
+- **The Recorded page.** What the file holds now, kind by kind, in the words the site's upload page uses, how many observations were dropped to keep the file small, where the file is written and where to upload it. On every client.
+- **Deals.** A third button opens the list of auctions under vendor price, which keeps its own window.
+- **The minimap button.** A click opens or closes the window, and a drag moves the button round the minimap's edge. `/ewow minimap` hides it or shows it again. Whether it is hidden and where it sits are the two things the window saves.
+- **The commands.** `/ewow` alone opens the window, where it used to print the status. `/ewow status` prints the status as before, and `/ewow route` with no place opens the Route page. On a client where the window cannot be built, `/ewow` prints the status as it always did.
+- **Nothing new is read.** The window shows what the commands show, and it records nothing.
+- **The version and the tests.** Both tables of contents list `Window.lua` and carry `## Version: 0.3.2`. The tests open the window on a stand in for the client's frames, type a trip, page through it, change the speed, read the Recorded page, click and drag the minimap button, and load a client that cannot build the window; the suite reads 2,717 assertions, from 2,635, under Lua 5.1 and 5.4.
 
 **0.3.1** times the flights you take. The site's map knows how long 195 Classic flights take, measured by players long ago, and can only guess at every flight master new in WoW Forever. Now each flight you take from end to end is written down, so the guesses can be replaced by what the flight really took.
 
@@ -147,7 +157,7 @@ It also makes the addon silent at login and reads Forever's auction house. On 24
    - macOS: `/Applications/World of Warcraft/_retail_/Interface/AddOns/EverythingWoW`
    - On Classic Era, replace `_retail_` with `_classic_era_`.
 3. Start the game, open the character select screen, click AddOns, and make sure Everything WoW Companion is checked.
-4. Play. Type `/ewow status` at any time to see what has been recorded.
+4. Play. Type `/ewow` at any time, or click the Companion's button on the minimap, to open its window and see what has been recorded.
 
 The folder must be named `EverythingWoW`, because the game looks for a table of contents file with the same name as its folder.
 
@@ -220,8 +230,10 @@ The map id and the coordinates are the client's own: `C_Map.GetBestMapForUnit("p
 
 | Command | What it does |
 |---|---|
+| `/ewow` | Opens the Companion's window: the Route page, the Recorded page and a button for the Deals list. `/ewow show` and `/ewow window` do the same. Where the client cannot build the window, it prints the status instead. |
+| `/ewow minimap` | Hides the Companion's button on the minimap, or shows it again. |
 | `/ewow status` | The client detected, the capability table, the recorders that cannot run on this client, the last forbidden action reported, the counts per kind, the number dropped, and the skipped, deduped, and ignored counts with the reason for each, plus the game version and the patch. |
-| `/ewow route <place>` | On WoW Forever, plans the trip to a place from where you stand, with the site's own planner: the steps and the time. `/ewow route <place> > <place>` plans between two places, and `/ewow route speed foot`, `travel`, `60` or `100` sets the speed routes are timed at. Records nothing. |
+| `/ewow route <place>` | On WoW Forever, plans the trip to a place from where you stand, with the site's own planner: the steps and the time. `/ewow route` alone opens the window's Route page. `/ewow route <place> > <place>` plans between two places, and `/ewow route speed foot`, `travel`, `60` or `100` sets the speed routes are timed at. Records nothing. |
 | `/ewow clear` | Throws away everything recorded so far. Start here if you would rather not upload something. |
 | `/ewow snapshot` | Records your character snapshot now rather than waiting for the next login. |
 | `/ewow path` | Prints where the file is written. |
