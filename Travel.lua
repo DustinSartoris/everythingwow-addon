@@ -870,7 +870,7 @@ function Travel.Lines(from, to)
     Travel.Estimate(result.band),
   }
   for index, step in ipairs(result.steps) do lines[#lines + 1] = index .. ". " .. Travel.StepLine(step) end
-  return lines, true
+  return lines, true, result
 end
 
 --[[

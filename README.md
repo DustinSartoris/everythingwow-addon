@@ -2,9 +2,18 @@
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.3.2. It is free and open source under the MIT license.
+This is version 0.3.3. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.3.3** puts a map in the window. In 0.3.2 the Route page had two boxes to type a place into; now it opens on a map of the world, and a click on a place plans the trip there.
+
+- **The map.** It is drawn from the same zone outlines as everythingwow.com's map: each zone outlined in the color of whose land it is, with its name, and a dot for each of the 127 places the planner knows. Click a place, or a zone's name, to go there from where you stand. Right-click a place to start from it instead. The steps are listed beside the map and the way is drawn on it, with a green ring where the trip starts and a gold ring where it ends.
+- **The boxes stay.** From and To still take a typed name, and a typed name takes the place of a picked one. The speed button and the paging of steps are as they were.
+- **The minimap button.** It carries everythingwow.com's own mark, is drawn the way the game's own round minimap buttons are, and sits just past the edge of the minimap whatever size the client draws it. In 0.3.2 it stood a fixed distance from the middle, which put it in the wrong place on a larger minimap. The same mark is the addon's icon in the game's addon list.
+- **New files.** `TravelMap.lua` holds the outlines, thinned from 6,302 points to 878 and written by `tools/gen_travel_map.py` from the site's files; the wide empty sea between the continents is closed up so the land fills the picture. `Media` holds three small pictures, the mark, a dot and a ring, written by `tools/gen_media.py`.
+- **Where it cannot be drawn.** A client with no line drawing gets the names, the dots and the rings without the outlines. Off WoW Forever the map's place holds a note, as the planner is WoW Forever's. The window is drawn smaller on a screen it would not fit.
+- **The version and the tests.** Both tables of contents list `TravelMap.lua` and carry `## Version: 0.3.3`. The tests count the map's lines, dots and names, put a place on the map by hand and compare, click and right-click places and a zone's name, type over a pick, draw and clear a way, place the minimap button on minimaps of two sizes, and read the three pictures' headers; the suite reads 2,825 assertions, from 2,759, under Lua 5.1 and 5.4.
 
 **0.3.2** gives the Companion a window. `/ewow` opens it, and so does a new button on the minimap. Until now everything the addon did was a chat command; every command still works.
 
@@ -231,7 +240,7 @@ The map id and the coordinates are the client's own: `C_Map.GetBestMapForUnit("p
 
 | Command | What it does |
 |---|---|
-| `/ewow` | Opens the Companion's window: the Route page, the Recorded page and a button for the Deals list. `/ewow show` and `/ewow window` do the same. Where the client cannot build the window, it prints the status instead. |
+| `/ewow` | Opens the Companion's window: the Route page with its map, the Recorded page and a button for the Deals list. `/ewow show` and `/ewow window` do the same. Where the client cannot build the window, it prints the status instead. |
 | `/ewow minimap` | Hides the Companion's button on the minimap, or shows it again. |
 | `/ewow status` | The client detected, the capability table, the recorders that cannot run on this client, the last forbidden action reported, the counts per kind, the number dropped, and the skipped, deduped, and ignored counts with the reason for each, plus the game version and the patch. |
 | `/ewow route <place>` | On WoW Forever, plans the trip to a place from where you stand, with the site's own planner: the steps and the time. `/ewow route` alone opens the window's Route page. `/ewow route <place> > <place>` plans between two places, and `/ewow route speed foot`, `travel`, `60` or `100` sets the speed routes are timed at. Records nothing. |

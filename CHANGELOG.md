@@ -2,6 +2,15 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.3.3** puts a map in the window. In 0.3.2 the Route page had two boxes to type a place into; now it opens on a map of the world, and a click on a place plans the trip there.
+
+- **The map.** It is drawn from the same zone outlines as everythingwow.com's map: each zone outlined in the color of whose land it is, with its name, and a dot for each of the 127 places the planner knows. Click a place, or a zone's name, to go there from where you stand. Right-click a place to start from it instead. The steps are listed beside the map and the way is drawn on it, with a green ring where the trip starts and a gold ring where it ends.
+- **The boxes stay.** From and To still take a typed name, and a typed name takes the place of a picked one. The speed button and the paging of steps are as they were.
+- **The minimap button.** It carries everythingwow.com's own mark, is drawn the way the game's own round minimap buttons are, and sits just past the edge of the minimap whatever size the client draws it. In 0.3.2 it stood a fixed distance from the middle, which put it in the wrong place on a larger minimap. The same mark is the addon's icon in the game's addon list.
+- **New files.** `TravelMap.lua` holds the outlines, thinned from 6,302 points to 878 and written by `tools/gen_travel_map.py` from the site's files; the wide empty sea between the continents is closed up so the land fills the picture. `Media` holds three small pictures, the mark, a dot and a ring, written by `tools/gen_media.py`.
+- **Where it cannot be drawn.** A client with no line drawing gets the names, the dots and the rings without the outlines. Off WoW Forever the map's place holds a note, as the planner is WoW Forever's. The window is drawn smaller on a screen it would not fit.
+- **The version and the tests.** Both tables of contents list `TravelMap.lua` and carry `## Version: 0.3.3`. The tests count the map's lines, dots and names, put a place on the map by hand and compare, click and right-click places and a zone's name, type over a pick, draw and clear a way, place the minimap button on minimaps of two sizes, and read the three pictures' headers; the suite reads 2,825 assertions, from 2,759, under Lua 5.1 and 5.4.
+
 **0.3.2** gives the Companion a window. `/ewow` opens it, and so does a new button on the minimap. Until now everything the addon did was a chat command; every command still works.
 
 - **The Route page.** Two boxes, From and To, a speed button and Plan Route. Leave From empty and the trip starts where your character stands. The answer is the planner's own, the one `/ewow route` prints: the trip, the estimate and the steps in order, eight to a page. A click on the speed button goes round the four speeds and plans the trip again. WoW Forever only, like the planner; on any other client the window opens on the Recorded page.

@@ -1,15 +1,15 @@
 --[[
 The Companion's window.
 
-Until 0.3.2 everything the addon could do was a chat command. The window
-gives it a face: /ewow opens it, and so does the button on the minimap.
+/ewow opens it, and so does the button on the minimap. It has two pages.
 
-It has two pages.
-
-Route. Two boxes, From and To, a speed, and a button. Leave From empty and
-the trip starts where your character stands. The answer is the planner's
-own, the one /ewow route prints: the trip, the estimate, and the steps in
-order, shown as a list you can page through.
+Route. A map of the world on the left and the trip on the right. The map is
+drawn from the same zone outlines everythingwow.com's map draws, with every
+place the planner knows as a dot on it. Click a place, or a zone's name, to
+go there: the trip is planned from where your character stands, the steps
+are listed beside the map and the way is drawn on it. Right-click a place
+to start from it instead. The two boxes still take a typed name, and the
+speed button goes round the four speeds.
 
 Recorded. What the file holds now, kind by kind, in the words the site's
 upload page uses, how many observations were dropped to keep the file small,
@@ -20,15 +20,19 @@ its own window beside the auction house.
 
 Every frame is built inside a pcall and with the game's own templates where
 the client has them. A client on which the window cannot be built gets the
-chat commands as before, and /ewow prints the status line there as it
-always did. The window reads what the commands read and saves nothing.
+chat commands as before, and one on which only the map cannot be drawn
+keeps the two boxes. The window reads what the commands read, and saves
+nothing but where the minimap button sits.
 ]]
 
 local ADDON_NAME, EW = ...
 
 EW.WINDOW_STEP_ROWS = 8
-EW.WINDOW_WIDTH = 560
-EW.WINDOW_HEIGHT = 420
+EW.WINDOW_MAP_HEIGHT = 540
+EW.WINDOW_SIDE_WIDTH = 270
+
+local MEDIA = "Interface\\AddOns\\" .. tostring(ADDON_NAME) .. "\\Media\\"
+EW.MEDIA = MEDIA
 
 local SPEED_LABELS = { foot = "On foot", travel_form = "Travel form", mount_60 = "Mount 60%", mount_100 = "Mount 100%" }
 
@@ -49,9 +53,41 @@ local KIND_LABELS = {
   item = "Items",
 }
 
+-- How each kind of place is drawn on the map: its size, its color, the
+-- word for it, and how far above the others it lies.
+local PIN_STYLES = {
+  capital_city = { size = 13, color = { 1, 0.82, 0.25 }, label = "Capital", level = 6 },
+  town = { size = 8, color = { 0.95, 0.93, 0.88 }, label = "Town", level = 4 },
+  harbor = { size = 9, color = { 0.35, 0.8, 0.95 }, label = "Harbor", level = 5 },
+  zeppelin_tower = { size = 9, color = { 0.35, 0.8, 0.95 }, label = "Zeppelin tower", level = 5 },
+  sky_dock = { size = 9, color = { 0.35, 0.8, 0.95 }, label = "Sky dock", level = 5 },
+  dungeon = { size = 8, color = { 0.7, 0.5, 0.95 }, label = "Dungeon", level = 3 },
+  raid = { size = 9, color = { 0.95, 0.4, 0.75 }, label = "Raid", level = 3 },
+  battleground = { size = 8, color = { 0.95, 0.35, 0.3 }, label = "Battleground", level = 3 },
+  landmark = { size = 7, color = { 0.65, 0.65, 0.65 }, label = "Landmark", level = 2 },
+}
+
+-- The color of a zone's outline and name, by whose land it is.
+local ZONE_COLORS = {
+  alliance = { 0.35, 0.6, 1 },
+  horde = { 0.95, 0.35, 0.3 },
+  contested = { 0.9, 0.75, 0.35 },
+  neutral = { 0.5, 0.85, 0.55 },
+  none = { 0.6, 0.6, 0.6 },
+}
+
+-- The color of a step's line on the map, by how it is traveled.
+local STEP_COLORS = {
+  flight = { 0.6, 0.85, 1 },
+  ride = { 0.3, 0.95, 0.8 },
+}
+local STEP_COLOR = { 1, 0.82, 0.2 }
+
 local window, windowFailed = nil, false
 local page, stepPage = "route", 1
 local answer = nil
+-- The places picked on the map, as the planner's own nodes.
+local picks = { from = nil, to = nil }
 
 --------------------------------------------------------------------------
 -- What the pages show, as plain values, so the tests can read them
@@ -62,34 +98,117 @@ local function Trim(text)
   return (text:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+local PLACE_BY_KEY = {}
+if EW.TRAVEL and EW.TRAVEL.PLACES then
+  for _, place in ipairs(EW.TRAVEL.PLACES) do PLACE_BY_KEY[place.key] = place end
+end
+
+--[[ Where a point of the atlas lies on the window's map, in the map's own
+     units from its top left corner. ]]
+function EW.MapPoint(x, y)
+  local M = EW.TRAVEL_MAP
+  if not M or type(x) ~= "number" or type(y) ~= "number" then return nil end
+  local moved = x
+  for _, cut in ipairs(M.CUTS) do
+    if x >= cut.x then moved = moved - cut.shift end
+  end
+  return moved - M.originX, y - M.originY
+end
+
+--[[ Where one of the planner's nodes lies on the map: a place at its own
+     spot, a zone at its middle. ]]
+function EW.MapNodePoint(node)
+  if type(node) ~= "string" or not EW.TRAVEL then return nil end
+  local kind, key = node:match("^(%a+):(.+)$")
+  if kind == "place" and PLACE_BY_KEY[key] then
+    return EW.MapPoint(PLACE_BY_KEY[key].x, PLACE_BY_KEY[key].y)
+  end
+  if kind == "zone" and EW.TRAVEL.ZONES[key] then
+    return EW.MapPoint(EW.TRAVEL.ZONES[key].x, EW.TRAVEL.ZONES[key].y)
+  end
+  return nil
+end
+
 --[[
-Plans the trip the two boxes ask for. Returns { ok = true, title, estimate,
-steps } where a route was found and { ok = false, message } otherwise. An
-empty From is where the character stands.
+Where each zone's name goes on a map drawn at a scale, in pixels from the
+map's top left corner: { [zone key] = { x, y } }. A name starts on its
+zone's middle and is moved up or down a line where it would lie on a
+place's dot or on a name already set, so that as few as can be collide.
 ]]
-function EW.RouteAnswer(fromText, toText)
+function EW.MapLabelSpots(scale)
+  local T = EW.TRAVEL
+  local spots, taken = {}, {}
+  if not T or not EW.TRAVEL_MAP then return spots end
+  for _, place in ipairs(T.PLACES) do
+    local x, y = EW.MapPoint(place.x, place.y)
+    local style = PIN_STYLES[place.kind] or PIN_STYLES.landmark
+    if x then taken[#taken + 1] = { x * scale, y * scale, style.size + 2, style.size + 2 } end
+  end
+  local function Hits(x, y, width, height)
+    local hits = 0
+    for _, box in ipairs(taken) do
+      if math.abs(x - box[1]) * 2 < width + box[3] and math.abs(y - box[2]) * 2 < height + box[4] then
+        hits = hits + 1
+      end
+    end
+    return hits
+  end
+  for _, key in ipairs(T.ZONE_ORDER) do
+    local zone = T.ZONES[key]
+    local x, y = EW.MapPoint(zone.x, zone.y)
+    if x then
+      x, y = x * scale, y * scale
+      local width, height = #zone.name * 5.2 + 4, 11
+      local best, bestHits = 0, nil
+      for _, move in ipairs({ 0, 11, -11, 21, -21 }) do
+        local hits = Hits(x, y + move, width, height)
+        if not bestHits or hits < bestHits then best, bestHits = move, hits end
+        if hits == 0 then break end
+      end
+      spots[key] = { x, y + best }
+      taken[#taken + 1] = { x, y + best, width, height }
+    end
+  end
+  return spots
+end
+
+--[[
+Plans a trip. The two texts are what the boxes hold; the two nodes are what
+was picked on the map, and a picked node wins over its box. An empty From
+is where the character stands. Returns { ok = true, title, estimate, steps,
+plan, from, to } where a route was found and { ok = false, message }
+otherwise, with from and to where they were understood.
+]]
+function EW.RouteAnswer(fromText, toText, fromNode, toNode)
   local Travel = EW.Travel
   if not Travel or EW.VersionKey() ~= "forever" then
     return { ok = false, message = "The route planner covers WoW Forever only." }
   end
   fromText, toText = Trim(fromText), Trim(toText)
-  if toText == "" then return { ok = false, message = "Type where you want to go." } end
-  local from
-  if fromText == "" then
+  local from, to = fromNode, toNode
+  if not from and fromText ~= "" then from = Travel.Find(fromText) end
+  if not to then
+    if toText == "" then
+      return { ok = false, from = from, message = "Click a place on the map, or type where you want to go." }
+    end
+    to = Travel.Find(toText)
+  end
+  if not from and fromText == "" then
     from = Travel.Here()
     if not from then
-      return { ok = false, message = "The planner does not know the map you are on. Type where you start from." }
+      return {
+        ok = false,
+        to = to,
+        message = "The planner does not know the map you are on. Right-click a place to start from it, or type it.",
+      }
     end
-  else
-    from = Travel.Find(fromText)
   end
-  local to = Travel.Find(toText)
-  if not from or not to then return { ok = false, message = Travel.Refusal("not_on_map") } end
-  local lines, found = Travel.Lines(from, to)
-  if not found then return { ok = false, message = lines[1] } end
+  if not from or not to then return { ok = false, from = from, to = to, message = Travel.Refusal("not_on_map") } end
+  local lines, found, plan = Travel.Lines(from, to)
+  if not found then return { ok = false, from = from, to = to, message = lines[1] } end
   local steps = {}
   for index = 3, #lines do steps[#steps + 1] = lines[index] end
-  return { ok = true, title = lines[1], estimate = lines[2], steps = steps }
+  return { ok = true, title = lines[1], estimate = lines[2], steps = steps, plan = plan, from = from, to = to }
 end
 
 --[[ What the file holds: the rows of the Recorded page, a heading line
@@ -135,6 +254,58 @@ local function ShowAll(list, shown)
   end
 end
 
+--[[ Puts a ring on the map at a node, or takes it away. ]]
+local function PlaceMarker(map, marker, node)
+  local x, y
+  if node then x, y = EW.MapNodePoint(node) end
+  if not x then
+    marker:Hide()
+    marker.node = nil
+    return
+  end
+  marker:ClearAllPoints()
+  marker:SetPoint("CENTER", map, "TOPLEFT", x * map.scale, -y * map.scale)
+  marker:Show()
+  marker.node = node
+end
+
+--[[ Draws the planned way on the map, a line for each step, and the two
+     rings: where the trip starts and where it ends. ]]
+local function DrawRoute()
+  local map = window and window.map
+  if not map then return end
+  -- The lines need the client's line drawing; the rings do not.
+  pcall(function()
+    local used = 0
+    if answer and answer.ok and answer.plan then
+      for _, step in ipairs(answer.plan.steps) do
+        local ax, ay = EW.MapNodePoint(step.fromNode)
+        local bx, by = EW.MapNodePoint(step.toNode)
+        if ax and bx and (ax ~= bx or ay ~= by) then
+          local line = map.route[used + 1]
+          if not line then
+            line = map:CreateLine(nil, "ARTWORK")
+            line:SetThickness(3)
+            map.route[used + 1] = line
+          end
+          used = used + 1
+          local color = STEP_COLORS[step.family] or STEP_COLOR
+          line:SetColorTexture(color[1], color[2], color[3], 0.95)
+          line:SetStartPoint("TOPLEFT", map, ax * map.scale, -ay * map.scale)
+          line:SetEndPoint("TOPLEFT", map, bx * map.scale, -by * map.scale)
+          line:Show()
+        end
+      end
+    end
+    for index = used + 1, #map.route do map.route[index]:Hide() end
+    map.routeShown = used
+  end)
+  local from = picks.from or (answer and answer.from) or (EW.Travel and EW.Travel.Here()) or nil
+  local to = picks.to or (answer and answer.to) or nil
+  PlaceMarker(map, map.here, from)
+  PlaceMarker(map, map.goal, to)
+end
+
 local function RefreshRoute()
   local frame = window
   frame.speed:SetText("Speed: " .. SPEED_LABELS[CurrentSpeed()])
@@ -145,7 +316,11 @@ local function RefreshRoute()
   if stepPage < 1 then stepPage = 1 end
   if not answer then
     frame.heading:SetText("Where to?")
-    frame.estimate:SetText("Leave From empty to start where you stand.")
+    if frame.map then
+      frame.estimate:SetText("Click a place on the map to go there from where you stand.")
+    else
+      frame.estimate:SetText("Leave From empty to start where you stand.")
+    end
   elseif answer.ok then
     frame.heading:SetText(answer.title)
     frame.estimate:SetText(answer.estimate)
@@ -174,6 +349,7 @@ local function RefreshRoute()
     frame.prev:Hide()
     frame.next:Hide()
   end
+  pcall(DrawRoute)
 end
 
 local function RefreshRecorded()
@@ -215,7 +391,7 @@ local function Plan()
     fromText = window.from:GetText() or ""
     toText = window.to:GetText() or ""
   end)
-  answer = EW.RouteAnswer(fromText, toText)
+  answer = EW.RouteAnswer(fromText, toText, picks.from, picks.to)
   stepPage = 1
   pcall(function()
     window.from:ClearFocus()
@@ -225,7 +401,164 @@ local function Plan()
 end
 EW.WindowPlan = Plan
 
+--[[ A place or a zone was picked on the map: a click is where to go, a
+     right-click is where to start. The box takes its name, and the trip is
+     planned at once. ]]
+function EW.WindowPick(node, mouseButton)
+  if not window or type(node) ~= "string" then return end
+  local name = (EW.Travel and EW.Travel.NodeName(node)) or ""
+  if mouseButton == "RightButton" then
+    picks.from = node
+    window.from:SetText(name)
+  else
+    picks.to = node
+    window.to:SetText(name)
+  end
+  Plan()
+end
+
+--[[ The tooltip of a dot or a zone's name on the map. ]]
+local function ShowMapTip(owner)
+  pcall(function()
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:SetText(owner.tipName, 1, 1, 1)
+    if owner.tipKind then GameTooltip:AddLine(owner.tipKind, 0.9, 0.8, 0.5) end
+    GameTooltip:AddLine("Click to go here. Right-click to start here.", 0.7, 0.7, 0.7)
+    GameTooltip:Show()
+  end)
+end
+local function HideMapTip() pcall(function() GameTooltip:Hide() end) end
+
+--[[ One thing on the map that can be picked. ]]
+local function Pickable(button, node, name, kind)
+  button.node, button.tipName, button.tipKind = node, name, kind
+  pcall(function() button:RegisterForClicks("LeftButtonUp", "RightButtonUp") end)
+  button:SetScript("OnClick", function(self, mouseButton) pcall(EW.WindowPick, self.node, mouseButton) end)
+  button:SetScript("OnEnter", ShowMapTip)
+  button:SetScript("OnLeave", HideMapTip)
+end
+
+--[[
+The map: the sea, each zone's outline in the color of whose land it is,
+each zone's name, and a dot for every place. Returns the map's frame. The
+outlines need the client's line drawing; where it has none, the names and
+the dots are drawn without them.
+]]
+local function BuildMap(frame, left, top, width, height)
+  local T, M = EW.TRAVEL, EW.TRAVEL_MAP
+  local map = CreateFrame("Frame", nil, frame)
+  map:SetSize(width, height)
+  map:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
+  pcall(function() map:SetClipsChildren(true) end)
+  local sea = map:CreateTexture(nil, "BACKGROUND")
+  sea:SetAllPoints(map)
+  sea:SetColorTexture(0.04, 0.07, 0.11, 1)
+  local scale = height / M.height
+  map.scale = scale
+  map.lines, map.route, map.pins, map.zones = 0, {}, {}, {}
+
+  pcall(function()
+    for _, key in ipairs(T.ZONE_ORDER) do
+      local zone = T.ZONES[key]
+      local color = ZONE_COLORS[zone.faction] or ZONE_COLORS.none
+      for _, ring in ipairs(M.OUTLINES[key] or {}) do
+        local count = #ring / 2
+        for index = 1, count do
+          local after = index % count + 1
+          local line = map:CreateLine(nil, "BORDER")
+          line:SetThickness(1.2)
+          line:SetColorTexture(color[1], color[2], color[3], 0.8)
+          line:SetStartPoint("TOPLEFT", map, ring[index * 2 - 1] * scale, -ring[index * 2] * scale)
+          line:SetEndPoint("TOPLEFT", map, ring[after * 2 - 1] * scale, -ring[after * 2] * scale)
+          map.lines = map.lines + 1
+        end
+      end
+    end
+  end)
+
+  local baseLevel = 1
+  pcall(function() baseLevel = map:GetFrameLevel() + 1 end)
+
+  -- The zones' names. A name is a button: a click picks the zone.
+  local spots = EW.MapLabelSpots(scale)
+  for _, key in ipairs(T.ZONE_ORDER) do
+    local zone = T.ZONES[key]
+    local spot = spots[key]
+    if spot then
+      local color = ZONE_COLORS[zone.faction] or ZONE_COLORS.none
+      local button = CreateFrame("Button", nil, map)
+      button:SetSize(#zone.name * 5.2 + 4, 11)
+      button:SetPoint("CENTER", map, "TOPLEFT", spot[1], -spot[2])
+      pcall(function() button:SetFrameLevel(baseLevel) end)
+      local text = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      text:SetPoint("CENTER", button, "CENTER", 0, 0)
+      pcall(function()
+        local font = text:GetFont()
+        text:SetFont(font, 9, "OUTLINE")
+      end)
+      text:SetText(zone.name)
+      text:SetTextColor(color[1], color[2], color[3], 1)
+      pcall(function() button:SetSize(math.max(24, text:GetStringWidth() + 2), 11) end)
+      button.text = text
+      Pickable(button, "zone:" .. key, zone.name, "Zone")
+      map.zones[key] = button
+    end
+  end
+
+  -- The places, each a dot.
+  for _, place in ipairs(T.PLACES) do
+    local x, y = EW.MapPoint(place.x, place.y)
+    if x then
+      local style = PIN_STYLES[place.kind] or PIN_STYLES.landmark
+      local pin = CreateFrame("Button", nil, map)
+      pin:SetSize(style.size, style.size)
+      pin:SetPoint("CENTER", map, "TOPLEFT", x * scale, -y * scale)
+      pcall(function() pin:SetFrameLevel(baseLevel + style.level) end)
+      local rim = pin:CreateTexture(nil, "BACKGROUND")
+      rim:SetPoint("TOPLEFT", pin, "TOPLEFT", -1, 1)
+      rim:SetPoint("BOTTOMRIGHT", pin, "BOTTOMRIGHT", 1, -1)
+      rim:SetTexture(MEDIA .. "dot")
+      rim:SetVertexColor(0, 0, 0, 0.9)
+      local dot = pin:CreateTexture(nil, "ARTWORK")
+      dot:SetAllPoints(pin)
+      dot:SetTexture(MEDIA .. "dot")
+      dot:SetVertexColor(style.color[1], style.color[2], style.color[3], 1)
+      pcall(function() pin:SetHighlightTexture(MEDIA .. "ring") end)
+      local zone = place.zone and T.ZONES[place.zone]
+      Pickable(pin, "place:" .. place.key, place.name, zone and (style.label .. ", " .. zone.name) or style.label)
+      map.pins[place.key] = pin
+    end
+  end
+
+  -- The two rings: where the trip starts, and where it ends.
+  local function Ring(size, r, g, b)
+    local ring = map:CreateTexture(nil, "OVERLAY")
+    ring:SetSize(size, size)
+    ring:SetTexture(MEDIA .. "ring")
+    ring:SetVertexColor(r, g, b, 1)
+    ring:Hide()
+    return ring
+  end
+  map.here = Ring(20, 0.3, 1, 0.4)
+  map.goal = Ring(24, 1, 0.82, 0.2)
+
+  local hint = map:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  hint:SetPoint("BOTTOMLEFT", map, "BOTTOMLEFT", 6, 6)
+  hint:SetText("Click a place to go there. Right-click a place to start from it.")
+  map.hint = hint
+  return map
+end
+
 local function BuildWindow()
+  local forever = EW.VersionKey() == "forever" and EW.TRAVEL ~= nil and EW.TRAVEL_MAP ~= nil
+  local mapHeight = EW.WINDOW_MAP_HEIGHT
+  local mapWidth = 636
+  if EW.TRAVEL_MAP then mapWidth = math.floor(mapHeight * EW.TRAVEL_MAP.width / EW.TRAVEL_MAP.height) end
+  local side = EW.WINDOW_SIDE_WIDTH
+  local width = 14 + mapWidth + 12 + side + 14
+  local height = 64 + mapHeight + 14
+  EW.WINDOW_WIDTH, EW.WINDOW_HEIGHT = width, height
+
   local frame
   local templated = pcall(function()
     frame = CreateFrame("Frame", "EverythingWoWWindow", UIParent, "BasicFrameTemplateWithInset")
@@ -241,7 +574,7 @@ local function BuildWindow()
     end)
   end
 
-  frame:SetSize(EW.WINDOW_WIDTH, EW.WINDOW_HEIGHT)
+  frame:SetSize(width, height)
   frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   frame:SetFrameStrata("HIGH")
   frame:SetClampedToScreen(true)
@@ -250,14 +583,19 @@ local function BuildWindow()
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", function(self) pcall(self.StartMoving, self) end)
   frame:SetScript("OnDragStop", function(self) pcall(self.StopMovingOrSizing, self) end)
+  -- On a small screen the whole window is drawn smaller rather than cut off.
+  pcall(function()
+    local fit = math.min(1, (UIParent:GetWidth() - 40) / width, (UIParent:GetHeight() - 60) / height)
+    if fit < 1 then frame:SetScale(math.max(0.5, fit)) end
+  end)
 
   local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   title:SetPoint("TOP", frame, "TOP", 0, -6)
   title:SetText("Everything WoW Companion")
 
-  local function Button(label, width, onClick)
+  local function Button(label, buttonWidth, onClick)
     local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    button:SetSize(width, 22)
+    button:SetSize(buttonWidth, 22)
     button:SetText(label)
     button:SetScript("OnClick", function() pcall(onClick) end)
     return button
@@ -280,54 +618,86 @@ local function BuildWindow()
   local function Route(widget) routeWidgets[#routeWidgets + 1] = widget return widget end
   local function Recorded(widget) recordedWidgets[#recordedWidgets + 1] = widget return widget end
 
-  -- The Route page.
-  local function Box(label, x, width)
+  -- The Route page: the map on the left.
+  if forever then
+    local ok, map = pcall(BuildMap, frame, 14, -64, mapWidth, mapHeight)
+    if ok and map then
+      frame.map = Route(map)
+    else
+      EW.mapError = tostring(map)
+    end
+  end
+  if not frame.map then
+    local note = Route(Text("GameFontDisable", "CENTER"))
+    note:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -64 - mapHeight / 2)
+    note:SetWidth(mapWidth)
+    if forever then
+      note:SetText("The map could not be drawn on this client. Type the two places instead.")
+    else
+      note:SetText("The map and the route planner cover WoW Forever only.")
+    end
+    frame.mapNote = note
+  end
+
+  -- The Route page: the trip on the right.
+  local column = 14 + mapWidth + 12
+  local function Box(label, top, which)
     local caption = Route(Text("GameFontNormalSmall"))
-    caption:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -64)
+    caption:SetPoint("TOPLEFT", frame, "TOPLEFT", column, top)
     caption:SetText(label)
     local box = Route(CreateFrame("EditBox", nil, frame, "InputBoxTemplate"))
-    box:SetSize(width, 20)
-    box:SetPoint("TOPLEFT", frame, "TOPLEFT", x + 4, -78)
+    box:SetSize(side - 8, 20)
+    box:SetPoint("TOPLEFT", frame, "TOPLEFT", column + 6, top - 14)
     box:SetAutoFocus(false)
     pcall(function() box:SetMaxLetters(60) end)
     box:SetScript("OnEnterPressed", function() pcall(Plan) end)
     box:SetScript("OnEscapePressed", function(self) pcall(self.ClearFocus, self) end)
+    -- A typed name takes the place of one picked on the map.
+    box:SetScript("OnTextChanged", function(_, userInput)
+      if userInput then picks[which] = nil end
+    end)
     return box
   end
-  frame.from = Box("From", 14, 180)
-  frame.to = Box("To", 210, 180)
-  local plan = Route(Button("Plan Route", 100, Plan))
-  plan:SetPoint("TOPLEFT", frame, "TOPLEFT", 406, -77)
+  frame.from = Box("From", -64, "from")
+  frame.to = Box("To", -104, "to")
   frame.speed = Route(Button("Speed", 150, function()
     EW.NextTravelSpeed()
     -- A new speed is a new answer to the same question.
     if answer then Plan() else Refresh() end
   end))
-  frame.speed:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -108)
+  frame.speed:SetPoint("TOPLEFT", frame, "TOPLEFT", column, -146)
+  local plan = Route(Button("Plan Route", 110, Plan))
+  plan:SetPoint("LEFT", frame.speed, "RIGHT", 8, 0)
 
   frame.heading = Route(Text("GameFontNormal"))
-  frame.heading:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -142)
-  frame.heading:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -14, -142)
+  frame.heading:SetPoint("TOPLEFT", frame, "TOPLEFT", column, -180)
+  frame.heading:SetWidth(side)
+  frame.heading:SetHeight(30)
   frame.estimate = Route(Text("GameFontHighlightSmall"))
-  frame.estimate:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -160)
-  frame.estimate:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -14, -160)
+  frame.estimate:SetPoint("TOPLEFT", frame, "TOPLEFT", column, -212)
+  frame.estimate:SetWidth(side)
+  frame.estimate:SetHeight(26)
+  for _, text in ipairs({ frame.heading, frame.estimate }) do
+    pcall(function() text:SetWordWrap(true) end)
+    pcall(function() text:SetJustifyV("TOP") end)
+  end
 
   frame.steps = {}
   for index = 1, EW.WINDOW_STEP_ROWS do
     local row = Route(Text("GameFontHighlightSmall"))
-    row:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -182 - (index - 1) * 26)
-    row:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -14, -182 - (index - 1) * 26)
-    row:SetHeight(24)
+    row:SetPoint("TOPLEFT", frame, "TOPLEFT", column, -244 - (index - 1) * 40)
+    row:SetWidth(side)
+    row:SetHeight(38)
     pcall(function() row:SetWordWrap(true) end)
     pcall(function() row:SetJustifyV("TOP") end)
     frame.steps[index] = row
   end
   frame.prev = Route(Button("Previous", 80, function() stepPage = stepPage - 1 Refresh() end))
-  frame.prev:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 10)
+  frame.prev:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", column, 12)
   frame.next = Route(Button("Next", 80, function() stepPage = stepPage + 1 Refresh() end))
-  frame.next:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 10)
+  frame.next:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 12)
   frame.pageText = Route(Text("GameFontHighlightSmall", "CENTER"))
-  frame.pageText:SetPoint("BOTTOM", frame, "BOTTOM", 0, 15)
+  frame.pageText:SetPoint("BOTTOM", frame, "BOTTOMLEFT", column + side / 2, 17)
 
   -- The Recorded page.
   frame.held = Recorded(Text("GameFontNormal"))
@@ -431,26 +801,67 @@ local function FollowPointer()
   EW.Database().minimapAngle = EW.MinimapAngleOf(x / scale, y / scale, centerX, centerY)
   EW.RefreshMinimapButton()
 end
+
+--[[ How far from the middle of the minimap the button sits: just past the
+     minimap's own edge, whatever size this client draws it. ]]
+function EW.MinimapRadius()
+  local radius = 80
+  pcall(function()
+    local width = Minimap:GetWidth()
+    if type(width) == "number" and width > 0 then radius = width / 2 + 5 end
+  end)
+  return radius
+end
+
 local function PlaceMinimapButton()
   local db = EW.Database()
   local angle = math.rad(type(db.minimapAngle) == "number" and db.minimapAngle or EW.MINIMAP_ANGLE)
+  local radius = EW.MinimapRadius()
   minimapButton:ClearAllPoints()
-  minimapButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * 80, math.sin(angle) * 80)
+  minimapButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radius, math.sin(angle) * radius)
 end
 
+--[[
+The button is drawn the way the game's own round minimap buttons are: a
+dark disc, the icon on it, and the gold ring over both. The ring's picture
+is a little different on the modern client and on the classic ones, so the
+sizes follow the client. The icon is everythingwow.com's own mark.
+]]
 local function BuildMinimapButton()
   local button = CreateFrame("Button", "EverythingWoWMinimapButton", Minimap)
-  button:SetSize(32, 32)
+  button:SetSize(31, 31)
   button:SetFrameStrata("MEDIUM")
   pcall(function() button:SetFrameLevel(8) end)
-  local icon = button:CreateTexture(nil, "BACKGROUND")
-  icon:SetSize(20, 20)
-  icon:SetPoint("CENTER", button, "CENTER", 0, 0)
-  icon:SetTexture("Interface\\ICONS\\INV_Misc_Book_09")
-  local border = button:CreateTexture(nil, "OVERLAY")
-  border:SetSize(54, 54)
-  border:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
-  border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  local modern = false
+  pcall(function() modern = WOW_PROJECT_ID ~= nil and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE end)
+  local ground = button:CreateTexture(nil, "BACKGROUND")
+  ground:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+  local icon = button:CreateTexture(nil, "ARTWORK")
+  icon:SetTexture(MEDIA .. "icon")
+  local ring = button:CreateTexture(nil, "OVERLAY")
+  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  ring:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
+  if modern then
+    ring:SetSize(50, 50)
+    ground:SetSize(24, 24)
+    ground:SetPoint("CENTER", button, "CENTER", 0, 1)
+    icon:SetSize(18, 18)
+    icon:SetPoint("CENTER", button, "CENTER", 0, 1)
+  else
+    ring:SetSize(53, 53)
+    ground:SetSize(20, 20)
+    ground:SetPoint("TOPLEFT", button, "TOPLEFT", 7, -5)
+    icon:SetSize(17, 17)
+    icon:SetPoint("TOPLEFT", button, "TOPLEFT", 7, -6)
+  end
+  -- A round cut for the square icon, where the client can make one.
+  pcall(function()
+    local mask = button:CreateMaskTexture()
+    mask:SetAllPoints(icon)
+    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    icon:AddMaskTexture(mask)
+  end)
+  button.icon, button.ring, button.modern = icon, ring, modern
   pcall(function() button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight") end)
   button:RegisterForClicks("AnyUp")
   button:SetScript("OnClick", function() pcall(EW.ToggleWindow) end)
@@ -465,7 +876,7 @@ local function BuildMinimapButton()
     pcall(function()
       GameTooltip:SetOwner(self, "ANCHOR_LEFT")
       GameTooltip:SetText("Everything WoW Companion")
-      GameTooltip:AddLine("Click to open: plan a route, see what is recorded.", 1, 1, 1)
+      GameTooltip:AddLine("Click to open the map and plan a route.", 1, 1, 1)
       GameTooltip:AddLine("Drag to move it round the minimap.", 0.7, 0.7, 0.7)
       GameTooltip:Show()
     end)

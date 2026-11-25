@@ -44,7 +44,7 @@ end
 
 stub.Install(_G)
 
-local FILES = { "Core", "Known", "Items", "Units", "Objects", "Quests", "Vendor", "Loot", "Flights", "Snapshot", "Talents", "Auction", "Deals", "TravelData", "Travel", "Window" }
+local FILES = { "Core", "Known", "Items", "Units", "Objects", "Quests", "Vendor", "Loot", "Flights", "Snapshot", "Talents", "Auction", "Deals", "TravelData", "Travel", "TravelMap", "Window" }
 
 --[[ Loads every addon file fresh into a new table, the way the game loads
      them once at login: EW.Client and EW.Caps are computed as Core.lua
@@ -94,7 +94,7 @@ local saved = db()
 equal("schema is the number one", saved.schema, 1)
 equal("version is the version key", saved.version, "retail")
 equal("client rides beside version as its own field", saved.client, "retail")
-equal("addon is the addon version", saved.addon, "0.3.2")
+equal("addon is the addon version", saved.addon, "0.3.3")
 equal("patch comes from GetBuildInfo", saved.patch, "12.1.0")
 check("observations is a list", type(saved.observations) == "table")
 equal("dropped starts at zero", saved.dropped, 0)
@@ -997,7 +997,7 @@ do
   check("status still reads game forever for the owner's own session",
     text:find("game forever", 1, true) ~= nil, text)
   check("status prints the 0.2.7 addon version",
-    text:find("version 0.3.2", 1, true) ~= nil, text)
+    text:find("version 0.3.3", 1, true) ~= nil, text)
 end
 
 --[[
@@ -2239,7 +2239,7 @@ do
   equal("the capture holds the interface number", capture.interface, 16001)
   equal("the capture holds the character's level", capture.level, 1)
   equal("the capture holds a timestamp", capture.t, stub.state.time)
-  equal("the capture holds the addon version", capture.addon, "0.3.2")
+  equal("the capture holds the addon version", capture.addon, "0.3.3")
   equal("the capture names the classic path", capture.source, "classic")
   equal("the classic path reports ok", capture.paths.classic, "ok")
   equal("the traits path reports absent on this client", capture.paths.traits, "absent")
@@ -2635,7 +2635,7 @@ equal("nine classes give nine forever captures", CountKeys(foreverTalents.captur
 local foreverDb = foreverFile.Database()
 equal("the forever file's version key is forever", foreverDb.version, "forever")
 equal("the forever file's client key is forever", foreverDb.client, "forever")
-equal("the forever file carries the 0.3.2 addon version", foreverDb.addon, "0.3.2")
+equal("the forever file carries the 0.3.3 addon version", foreverDb.addon, "0.3.3")
 check("the forever file holds what that client records", #foreverDb.observations >= 8, #foreverDb.observations)
 equal("the forever file's last observation is the item", foreverDb.observations[#foreverDb.observations].kind, "item")
 check("the forever file remembers the item it noted", type(foreverDb.items) == "table" and foreverDb.items[263015] ~= nil)
@@ -2684,7 +2684,7 @@ local function WriteClassicFile(suffix, project, build, key)
   local saved = addon.Database()
   equal("the " .. suffix .. " file's version key is " .. key, saved.version, key)
   equal("the " .. suffix .. " file's client key is " .. key, saved.client, key)
-  equal("the " .. suffix .. " file carries the 0.3.2 addon version", saved.addon, "0.3.2")
+  equal("the " .. suffix .. " file carries the 0.3.3 addon version", saved.addon, "0.3.3")
   local kinds = {}
   for _, observation in ipairs(saved.observations) do kinds[observation.kind] = true end
   check("the " .. suffix .. " file holds an auction page off the scan", kinds.auction == true)
@@ -2707,7 +2707,7 @@ dofile(root .. "tests/flights.lua")({ check = check, equal = equal, stub = stub,
 -- The route planner, from 0.3.0: its own file of cases and checks.
 dofile(root .. "tests/travel.lua")({ check = check, equal = equal, stub = stub, root = root, LoadFreshAddon = LoadFreshAddon })
 
--- The window and the minimap button, from 0.3.2.
+-- The window and the minimap button, from 0.3.3.
 dofile(root .. "tests/window.lua")({ check = check, equal = equal, stub = stub, root = root, LoadFreshAddon = LoadFreshAddon })
 
 print(string.format("%d passed, %d failed. File written to %s with %d observations, %s with %d, %s with %d, %s with %d, %s with %d, and %s with %d.",

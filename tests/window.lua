@@ -22,7 +22,16 @@ return function(t)
       if key == "IsShown" then return function(self) return self.shown end end
       if key == "SetScript" then return function(self, which, handler) self.scripts[which] = handler end end
       if key == "SetPoint" then return function(self, ...) self.point = { ... } end end
-      if key == "CreateFontString" or key == "CreateTexture" then return function() return MockFrame("Region") end end
+      if key == "SetTexture" then return function(self, texture) self.texture = texture end end
+      if key == "SetStartPoint" then return function(self, ...) self.startPoint = { ... } end end
+      if key == "SetEndPoint" then return function(self, ...) self.endPoint = { ... } end end
+      if key == "CreateFontString" or key == "CreateTexture" or key == "CreateMaskTexture" then
+        return function() return MockFrame("Region") end
+      end
+      if key == "CreateLine" then
+        if rawget(_G, "EW_TEST_NO_LINES") then return nil end
+        return function() return MockFrame("Line") end
+      end
       return function() end
     end })
   end
@@ -44,12 +53,12 @@ return function(t)
   EW.WINDOW_STEP_ROWS = 2
 
   -- The answers, before any window.
-  equal("no destination asks for one", EW.RouteAnswer("Orgrimmar", "  ").message, "Type where you want to go.")
+  equal("no destination asks for one", EW.RouteAnswer("Orgrimmar", "  ").message, "Click a place on the map, or type where you want to go.")
   equal("a place not on the map is refused in the site's words",
     EW.RouteAnswer("Orgrimmar", "Shattrath").message, "That place is not on this map.")
   stub.state.map = nil
   equal("an empty From on an unknown map asks for the start",
-    EW.RouteAnswer("", "Undercity").message, "The planner does not know the map you are on. Type where you start from.")
+    EW.RouteAnswer("", "Undercity").message, "The planner does not know the map you are on. Right-click a place to start from it, or type it.")
   stub.state.map = 1454
   local found = EW.RouteAnswer("", "undercity")
   equal("an empty From is where the character stands", found.title, "Orgrimmar to Undercity (On foot)")
@@ -114,6 +123,106 @@ return function(t)
   equal("and no step", window.steps[1]:IsShown(), false)
   equal("and no paging", window.pageText:IsShown(), false)
 
+  -- The map: every zone's outline, every zone's name, a dot for every place.
+  local map = window.map
+  check("the Route page has a map", map ~= nil, EW.mapError)
+  local M, T = EW.TRAVEL_MAP, EW.TRAVEL
+  local segments = 0
+  for _, zoneRings in pairs(M.OUTLINES) do
+    for _, ring in ipairs(zoneRings) do segments = segments + #ring / 2 end
+  end
+  equal("a line for every side of every outline", map.lines, segments)
+  check("of which there are several hundred, not thousands", segments > 400 and segments < 1500, segments)
+  local pins, inside = 0, true
+  for key, pin in pairs(map.pins) do
+    pins = pins + 1
+    local x, y = pin.point[4], -pin.point[5]
+    if x < 0 or y < 0 or x > EW.WINDOW_MAP_HEIGHT * M.width / M.height or y > EW.WINDOW_MAP_HEIGHT then inside = false end
+  end
+  equal("a dot for every place the planner knows", pins, #T.PLACES)
+  check("every dot lies on the map", inside)
+  local names = 0
+  for _ in pairs(map.zones) do names = names + 1 end
+  equal("a name for every zone", names, #T.ZONE_ORDER)
+  for key, zoneRings in pairs(M.OUTLINES) do
+    for _, ring in ipairs(zoneRings) do
+      for index = 1, #ring, 2 do
+        if ring[index] < 0 or ring[index] > M.width or ring[index + 1] < 0 or ring[index + 1] > M.height then
+          check("the outline of " .. key .. " lies on the map", false, ring[index] .. " " .. ring[index + 1])
+        end
+      end
+    end
+  end
+  local function near(a, b) return math.abs(a - b) < 0.01 end
+  local scale = EW.WINDOW_MAP_HEIGHT / M.height
+  local orgX, orgY = EW.MapPoint(710.8, 720)
+  check("a place west of every cut keeps its spot, less the origin", near(orgX, 710.8 - M.originX) and near(orgY, 720 - M.originY))
+  local moved = 0
+  for _, cut in ipairs(M.CUTS) do moved = moved + cut.shift end
+  local eastX = EW.MapPoint(2000, 500)
+  check("a place east of every cut is moved west by all of them", near(eastX, 2000 - moved - M.originX))
+  local orgrimmar = map.pins.orgrimmar
+  check("Orgrimmar's dot is at Orgrimmar",
+    orgrimmar.point[1] == "CENTER" and orgrimmar.point[2] == map and near(orgrimmar.point[4], orgX * scale) and near(orgrimmar.point[5], -orgY * scale))
+  equal("it carries the planner's own node", orgrimmar.node, "place:orgrimmar")
+  equal("and its name for the tooltip", orgrimmar.tipName, "Orgrimmar")
+  equal("with what it is and where", orgrimmar.tipKind, "Capital, Durotar")
+  equal("its picture is the addon's own dot", orgrimmar.scripts.OnEnter ~= nil and EW.MEDIA, "Interface\\AddOns\\EverythingWoW\\Media\\")
+  equal("the map says how to use it", map.hint.text, "Click a place to go there. Right-click a place to start from it.")
+
+  -- A click on a place goes there from where the character stands.
+  stub.state.map = 1454
+  window.from:SetText("")
+  window.to:SetText("")
+  map.pins.undercity.scripts.OnClick(map.pins.undercity, "LeftButton")
+  equal("a click on a place plans the trip there", window.heading.text, "Orgrimmar to Undercity (On foot)")
+  equal("and writes its name in the To box", window.to.text, "Undercity")
+  local drawn = EW.RouteAnswer("", "", nil, "place:undercity")
+  check("the way is drawn, a line a step", map.routeShown >= 2 and map.routeShown <= #drawn.plan.steps, map.routeShown)
+  equal("each line shown", map.route[1]:IsShown(), true)
+  local firstStep = drawn.plan.steps[1]
+  local ax, ay = EW.MapNodePoint(firstStep.fromNode)
+  check("the first line starts where the first step starts",
+    near(map.route[1].startPoint[3], ax * scale) and near(map.route[1].startPoint[4], -ay * scale))
+  equal("the gold ring is on the destination", map.goal.node, "place:undercity")
+  equal("shown", map.goal:IsShown(), true)
+  equal("the green ring is where the trip starts", map.here.node, "place:orgrimmar")
+
+  -- A right-click starts from the place.
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "RightButton")
+  equal("a right-click on a place starts the trip there", window.heading.text, "Booty Bay to Undercity (On foot)")
+  equal("and writes its name in the From box", window.from.text, "Booty Bay")
+  equal("the green ring moves to it", map.here.node, "place:bootybay")
+
+  -- A zone's name can be picked too.
+  map.zones.westfall.scripts.OnClick(map.zones.westfall, "LeftButton")
+  equal("a click on a zone's name goes to the zone", window.heading.text, "Booty Bay to Westfall (On foot)")
+  equal("the ring is on the zone's middle", map.goal.node, "zone:westfall")
+
+  -- A typed name takes the place of a picked one.
+  window.to.scripts.OnTextChanged(window.to, false)
+  window.to:SetText("Thunder Bluff")
+  EW.WindowPlan()
+  equal("text set by the window itself does not undo a pick", window.heading.text, "Booty Bay to Westfall (On foot)")
+  window.to.scripts.OnTextChanged(window.to, true)
+  window.from.scripts.OnTextChanged(window.from, true)
+  window.from:SetText("Orgrimmar")
+  EW.WindowPlan()
+  equal("a typed name takes the place of a picked one", window.heading.text, "Orgrimmar to Thunder Bluff (On foot)")
+
+  -- A refusal draws no way.
+  window.to:SetText("Shattrath")
+  EW.WindowPlan()
+  equal("a refusal draws no way", map.routeShown, 0)
+  equal("and hides the lines of the last one", map.route[1]:IsShown(), false)
+  equal("and the gold ring", map.goal:IsShown(), false)
+
+  -- The Recorded page hides the map.
+  EW.ShowWindow("recorded")
+  equal("the Recorded page puts the map away", map:IsShown(), false)
+  EW.ShowWindow("route")
+  equal("and the Route page brings it back", map:IsShown(), true)
+
   -- The Recorded page.
   EW.Record("npc", "npc", 3100, 1411, 0.5, 0.5, { name = "Elder Mottled Boar" })
   EW.Record("npc", "npc", 3101, 1411, 0.5, 0.5, { name = "Mottled Boar" })
@@ -155,6 +264,18 @@ return function(t)
   local button = EW.minimapButton
   equal("and shows it", button:IsShown(), true)
   equal("anchored to the minimap", button.point[2], _G.Minimap)
+  equal("its icon is the site's own mark", button.icon.texture, "Interface\\AddOns\\EverythingWoW\\Media\\icon")
+  equal("under the game's own ring", button.ring.texture, "Interface\\Minimap\\MiniMap-TrackingBorder")
+  equal("with no size to read it sits 80 from the middle", EW.MinimapRadius(), 80)
+  _G.Minimap.GetWidth = function() return 140 end
+  equal("on a minimap 140 wide it sits 75 from the middle, just past the edge", EW.MinimapRadius(), 75)
+  _G.Minimap.GetWidth = function() return 198 end
+  equal("on one 198 wide, 104", EW.MinimapRadius(), 104)
+  EW.RefreshMinimapButton()
+  check("and is put there",
+    math.abs(button.point[4] - math.cos(math.rad(215)) * 104) < 0.001 and math.abs(button.point[5] - math.sin(math.rad(215)) * 104) < 0.001)
+  _G.Minimap.GetWidth = nil
+  EW.RefreshMinimapButton()
   local function near(a, b) return math.abs(a - b) < 0.001 end
   check("at its first place on the edge, lower left",
     near(button.point[4], math.cos(math.rad(215)) * 80) and near(button.point[5], math.sin(math.rad(215)) * 80))
@@ -219,6 +340,44 @@ return function(t)
   equal("/ewow route there shows the Route page", retail.window.heading:IsShown(), true)
   retail.WindowPlan()
   equal("which says where the planner works", retail.window.heading.text, "The route planner covers WoW Forever only.")
+  equal("no map is drawn there", retail.window.map, nil)
+  equal("and a note stands in its place", retail.window.mapNote.text, "The map and the route planner cover WoW Forever only.")
+
+  -- A client that cannot draw lines still gets the names, the dots and the trip.
+  rawset(_G, "EW_TEST_NO_LINES", true)
+  local lineless = t.LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.state.map = 1454
+  lineless.SlashCommand("")
+  check("without line drawing the map is still built", lineless.window ~= nil and lineless.window.map ~= nil, lineless.mapError)
+  equal("with no outline", lineless.window.map.lines, 0)
+  check("but every dot", lineless.window.map.pins.orgrimmar ~= nil)
+  local linelessMap = lineless.window.map
+  linelessMap.pins.undercity.scripts.OnClick(linelessMap.pins.undercity, "LeftButton")
+  equal("a click still plans the trip", lineless.window.heading.text, "Orgrimmar to Undercity (On foot)")
+  equal("and the ring still marks the destination", linelessMap.goal.node, "place:undercity")
+  rawset(_G, "EW_TEST_NO_LINES", nil)
+
+  -- The three pictures the addon ships, as the game reads them.
+  for _, picture in ipairs({ { "icon", 64 }, { "dot", 16 }, { "ring", 32 } }) do
+    local handle = io.open(t.root .. "Media/" .. picture[1] .. ".tga", "rb")
+    check("Media/" .. picture[1] .. ".tga is shipped", handle ~= nil)
+    if handle then
+      local head = handle:read(18)
+      handle:close()
+      equal(picture[1] .. " is an uncompressed true color picture", head:byte(3), 2)
+      equal(picture[1] .. " is " .. picture[2] .. " wide", head:byte(13) + head:byte(14) * 256, picture[2])
+      equal(picture[1] .. " is " .. picture[2] .. " tall", head:byte(15) + head:byte(16) * 256, picture[2])
+      equal(picture[1] .. " has 32 bits a point", head:byte(17), 32)
+    end
+  end
+  for _, toc in ipairs({ "EverythingWoW.toc", "EverythingWoW_Vanilla.toc" }) do
+    local handle = assert(io.open(t.root .. toc, "r"))
+    local text = handle:read("*a")
+    handle:close()
+    check(toc .. " names the site's mark as the addon's icon",
+      text:find("## IconTexture: Interface\\AddOns\\EverythingWoW\\Media\\icon", 1, true) ~= nil)
+    check(toc .. " loads the map before the window", text:find("TravelMap.lua\nWindow.lua", 1, true) ~= nil)
+  end
 
   -- A client that cannot build the window keeps the commands.
   _G.CreateFrame = realCreateFrame
