@@ -387,6 +387,73 @@ return function(t)
   equal("and the ring still marks the destination", linelessMap.goal.node, "place:undercity")
   rawset(_G, "EW_TEST_NO_LINES", nil)
 
+  -- The game's own map, where the client can give its pictures and place
+  -- the zones: tests/fakeworld.lua stands in for the client's maps.
+  local real = t.LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  local world = dofile(t.root .. "tests/fakeworld.lua")(real)
+  stub.state.map = 1454
+  real.SlashCommand("")
+  local realMap = real.window and real.window.map
+  check("where the client gives its pictures, the window shows the game's own map",
+    realMap ~= nil and realMap.real == true, tostring(real.realMapError or real.mapError))
+  local mapWide, mapHigh = real.WINDOW_MAP_WIDTH, real.WINDOW_MAP_HEIGHT
+  equal("it opens on the continent the character is on", realMap.shown, world.KALIMDOR)
+  equal("with a button for each continent", #realMap.tabs, 2)
+  equal("named as the client names it", realMap.tabs[2].text, "Eastern Kingdoms")
+  local west = realMap.sheets[world.KALIMDOR]
+  equal("the continent is twelve pictures", #west.tiles, 12)
+  equal("the client's own files", west.tiles[2].texture, world.KALIMDOR * 100 + 2)
+  check("laid out from the corner", west.tiles[1].point[1] == "TOPLEFT" and west.tiles[1].point[4] == 0 and west.tiles[1].point[5] == 0)
+  check("the second a tile to the right", near(west.tiles[2].point[4], 256 / 1002 * mapWide) and west.tiles[2].point[5] == 0)
+  check("the fifth a tile down", west.tiles[5].point[4] == 0 and near(west.tiles[5].point[5], -256 / 668 * mapHigh))
+  equal("the other continent is not made until it is asked for", realMap.sheets[world.EASTERN], nil)
+  local realX, realY = real.Places.Spot("orgrimmar", world.KALIMDOR)
+  check("Orgrimmar's dot is where the client says Orgrimmar is",
+    near(realMap.pins.orgrimmar.point[4], realX * mapWide) and near(realMap.pins.orgrimmar.point[5], -realY * mapHigh))
+  equal("a place of the other continent has no dot here", realMap.pins.undercity, nil)
+  check("a zone of this continent has its name", realMap.zones.durotar ~= nil and realMap.zones.westfall == nil)
+  equal("a place put by its neighbors says so", realMap.pins["senjin-village"].estimated, true)
+  check("in its tooltip", realMap.pins["senjin-village"].tipKind:find("its spot is an estimate", 1, true) ~= nil, realMap.pins["senjin-village"].tipKind)
+  equal("a place with a real spot does not", realMap.pins.orgrimmar.tipKind, "Capital, Durotar")
+  check("the green ring is where the character really stands",
+    near(realMap.here.point[4], 0.61 * mapWide) and near(realMap.here.point[5], -0.44 * mapHigh))
+  equal("and says so", realMap.hereText.text, "You are here")
+
+  realMap.pins.ratchet.scripts.OnClick(realMap.pins.ratchet, "LeftButton")
+  equal("a click on a place plans the trip there", real.window.heading.text, "Orgrimmar to Ratchet (On foot)")
+  check("the way is drawn on the real map", realMap.routeShown >= 1, realMap.routeShown)
+  local ratchetX, ratchetY = real.Places.Spot("ratchet", world.KALIMDOR)
+  check("and the gold ring is on the place itself",
+    near(realMap.goal.point[4], ratchetX * mapWide) and near(realMap.goal.point[5], -ratchetY * mapHigh))
+
+  click(realMap.tabs[2])
+  equal("the second button shows the other continent", realMap.shown, world.EASTERN)
+  equal("the first continent's dots are put away", west.pins.orgrimmar:IsShown(), false)
+  equal("and its pictures", west.tiles[1]:IsShown(), false)
+  check("the other continent's dots are there", realMap.pins.undercity ~= nil and realMap.pins.undercity:IsShown() == true)
+  equal("its pictures are its own", realMap.sheets[world.EASTERN].tiles[1].texture, world.EASTERN * 100 + 1)
+  equal("a way that lies on the first continent is not drawn on the second", realMap.routeShown, 0)
+  equal("nor the rings", realMap.goal:IsShown(), false)
+  equal("the character is not on this continent, so no green ring", realMap.here:IsShown(), false)
+  realMap.pins.undercity.scripts.OnClick(realMap.pins.undercity, "LeftButton")
+  equal("a click there plans the trip across the sea", real.window.heading.text, "Orgrimmar to Undercity (On foot)")
+  equal("the gold ring marks it", realMap.goal.node, "place:undercity")
+  click(realMap.tabs[1])
+  equal("the first button brings the first continent back", west.pins.orgrimmar:IsShown(), true)
+  equal("with the second's dots put away", realMap.sheets[world.EASTERN].pins.undercity:IsShown(), false)
+  equal("and the green ring on the character again", realMap.here:IsShown(), true)
+  equal("the destination is on the other side, so no gold ring here", realMap.goal:IsShown(), false)
+
+  -- A client whose pictures do not fill their rows gets the drawn map.
+  world.files = 11
+  local drawn = t.LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  drawn.SlashCommand("")
+  check("where the pictures cannot be laid out the drawn map stands in", drawn.window.map ~= nil and drawn.window.map.real == false)
+  check("with its outlines", drawn.window.map.lines > 400)
+  world.files = 12
+  world.Remove()
+  stub.state.map = nil
+
   -- The pictures the addon ships, as the game reads them.
   for _, picture in ipairs({ { "icon", 64 }, { "minimap", 64 }, { "dot", 16 }, { "ring", 32 } }) do
     local handle = io.open(t.root .. "Media/" .. picture[1] .. ".tga", "rb")
@@ -406,7 +473,7 @@ return function(t)
     handle:close()
     check(toc .. " names the site's mark as the addon's icon",
       text:find("## IconTexture: Interface\\AddOns\\EverythingWoW\\Media\\icon", 1, true) ~= nil)
-    check(toc .. " loads the map before the window", text:find("TravelMap.lua\nWindow.lua", 1, true) ~= nil)
+    check(toc .. " loads the maps and the places before the window", text:find("TravelMap.lua\nTravelCoords.lua\nPlaces.lua\nWindow.lua", 1, true) ~= nil)
   end
 
   -- A client that cannot build the window keeps the commands.

@@ -2,9 +2,19 @@
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.3.4. It is free and open source under the MIT license.
+This is version 0.4.0. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.4.0** shows the game's own map in the window. The drawn map of 0.3.3 did not match the map players know, so the Route page now shows the real one.
+
+- **The real map.** The window shows a continent at a time, in the game's own pictures, asked of the client by the continent's number and laid out as the client lays them out. A button for each continent sits in the corner, and the window opens on the continent you are on.
+- **Places where they really are.** `TravelCoords.lua` holds, for 102 of the 127 places, the zone and the spot on that zone's own map, the numbers the game itself shows. From them the client says where each place lies on the map shown, so a dot sits on the place. The other 25 have only their drawn spot: each is put by its nearest neighbor with a real one, and its tooltip says its spot is an estimate.
+- **Where you really are.** The green ring marked "You are here" stands on your character's own spot on the map, not on the middle of your zone.
+- **The way on the real map.** A planned trip is drawn across the continent shown, a line a step, for the steps that lie on it; the other continent's part shows when you press its button.
+- **The drawn map stays as a stand in.** A client that cannot give its map's pictures, or cannot place the zones, gets the drawn map of 0.3.3 as before. Off WoW Forever a note stands in the map's place.
+- **New files.** `Places.lua` asks the client where places, zones and the character lie on a map; `TravelCoords.lua` is written by `tools/gen_travel_coords.py` from `tools/place-coords.json`.
+- **The version and the tests.** Both tables of contents list `TravelCoords.lua` and `Places.lua` and carry `## Version: 0.4.0`. The tests stand a small world in for the client's maps, two continents with every zone a rectangle on its own, and work out by hand where a place, a zone, an estimated place and the character must come out; they lay out the pictures, change continents, plan a trip on each and across the sea, and fall back to the drawn map where the pictures cannot be laid out. The suite reads 2,931 assertions, from 2,850, under Lua 5.1 and 5.4.
 
 **0.3.4** mends what the first look at 0.3.3 in the game showed.
 

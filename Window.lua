@@ -3,10 +3,11 @@ The Companion's window.
 
 /ewow opens it, and so does the button on the minimap. It has two pages.
 
-Route. A map of the world on the left and the trip on the right. The map is
-drawn from the same zone outlines everythingwow.com's map draws, with every
-place the planner knows as a dot on it. Click a place, or a zone's name, to
-go there: the trip is planned from where your character stands, the steps
+Route. A map on the left and the trip on the right. The map is the game's
+own, a continent at a time, with every place the planner knows as a dot
+where the game has the place; where the client cannot give its map, a map
+drawn from the site's own zone outlines stands in. Click a place, or a
+zone's name, to go there: the trip is planned from where your character stands, the steps
 are listed beside the map and the way is drawn on it. Right-click a place
 to start from it instead. The two boxes still take a typed name, and the
 speed button goes round the four speeds.
@@ -27,8 +28,9 @@ nothing but where the minimap button sits.
 
 local ADDON_NAME, EW = ...
 
-EW.WINDOW_STEP_ROWS = 8
-EW.WINDOW_MAP_HEIGHT = 540
+EW.WINDOW_STEP_ROWS = 7
+EW.WINDOW_MAP_WIDTH = 720
+EW.WINDOW_MAP_HEIGHT = 480
 EW.WINDOW_SIDE_WIDTH = 270
 
 local MEDIA = "Interface\\AddOns\\" .. tostring(ADDON_NAME) .. "\\Media\\"
@@ -129,6 +131,27 @@ function EW.MapNodePoint(node)
   return nil
 end
 
+--[[ Where one name goes: on its spot, or a line up or down where it would
+     lie on a dot or on a name already set. taken is the list of boxes set
+     so far, each { x, y, width, height } about its middle, and gains this
+     name's own. ]]
+function EW.MapNameSpot(taken, x, y, name)
+  local width, height = #name * 5.8 + 4, 11
+  local best, bestHits = 0, nil
+  for _, move in ipairs({ 0, 11, -11, 21, -21 }) do
+    local hits = 0
+    for _, box in ipairs(taken) do
+      if math.abs(x - box[1]) * 2 < width + box[3] and math.abs(y + move - box[2]) * 2 < height + box[4] then
+        hits = hits + 1
+      end
+    end
+    if not bestHits or hits < bestHits then best, bestHits = move, hits end
+    if hits == 0 then break end
+  end
+  taken[#taken + 1] = { x, y + best, width, height }
+  return x, y + best
+end
+
 --[[
 Where each zone's name goes on a map drawn at a scale, in pixels from the
 map's top left corner: { [zone key] = { x, y } }. A name starts on its
@@ -144,29 +167,12 @@ function EW.MapLabelSpots(scale)
     local style = PIN_STYLES[place.kind] or PIN_STYLES.landmark
     if x then taken[#taken + 1] = { x * scale, y * scale, style.size + 2, style.size + 2 } end
   end
-  local function Hits(x, y, width, height)
-    local hits = 0
-    for _, box in ipairs(taken) do
-      if math.abs(x - box[1]) * 2 < width + box[3] and math.abs(y - box[2]) * 2 < height + box[4] then
-        hits = hits + 1
-      end
-    end
-    return hits
-  end
   for _, key in ipairs(T.ZONE_ORDER) do
     local zone = T.ZONES[key]
     local x, y = EW.MapPoint(zone.x, zone.y)
     if x then
-      x, y = x * scale, y * scale
-      local width, height = #zone.name * 5.8 + 4, 11
-      local best, bestHits = 0, nil
-      for _, move in ipairs({ 0, 11, -11, 21, -21 }) do
-        local hits = Hits(x, y + move, width, height)
-        if not bestHits or hits < bestHits then best, bestHits = move, hits end
-        if hits == 0 then break end
-      end
-      spots[key] = { x, y + best }
-      taken[#taken + 1] = { x, y + best, width, height }
+      local nameX, nameY = EW.MapNameSpot(taken, x * scale, y * scale, zone.name)
+      spots[key] = { nameX, nameY }
     end
   end
   return spots
@@ -254,23 +260,23 @@ local function ShowAll(list, shown)
   end
 end
 
---[[ Puts a ring on the map at a node, or takes it away. ]]
-local function PlaceMarker(map, marker, node)
-  local x, y
-  if node then x, y = EW.MapNodePoint(node) end
+--[[ Puts a ring on the map at a spot, in pixels from its top left corner,
+     or takes it away. ]]
+local function PlaceMarker(map, marker, x, y, node)
   if not x then
     marker:Hide()
     marker.node = nil
     return
   end
   marker:ClearAllPoints()
-  marker:SetPoint("CENTER", map, "TOPLEFT", x * map.scale, -y * map.scale)
+  marker:SetPoint("CENTER", map, "TOPLEFT", x, -y)
   marker:Show()
   marker.node = node
 end
 
---[[ Draws the planned way on the map, a line for each step, and the two
-     rings: where the trip starts and where it ends. ]]
+--[[ Draws the planned way on the map, a line for each step whose two ends
+     are on the map shown, and the two rings: where the trip starts and
+     where it ends. ]]
 local function DrawRoute()
   local map = window and window.map
   if not map then return end
@@ -279,8 +285,8 @@ local function DrawRoute()
     local used = 0
     if answer and answer.ok and answer.plan then
       for _, step in ipairs(answer.plan.steps) do
-        local ax, ay = EW.MapNodePoint(step.fromNode)
-        local bx, by = EW.MapNodePoint(step.toNode)
+        local ax, ay = map.Pixel(step.fromNode)
+        local bx, by = map.Pixel(step.toNode)
         if ax and bx and (ax ~= bx or ay ~= by) then
           local line = map.route[used + 1]
           if not line then
@@ -291,8 +297,8 @@ local function DrawRoute()
           used = used + 1
           local color = STEP_COLORS[step.family] or STEP_COLOR
           line:SetColorTexture(color[1], color[2], color[3], 0.95)
-          line:SetStartPoint("TOPLEFT", map, ax * map.scale, -ay * map.scale)
-          line:SetEndPoint("TOPLEFT", map, bx * map.scale, -by * map.scale)
+          line:SetStartPoint("TOPLEFT", map, ax, -ay)
+          line:SetEndPoint("TOPLEFT", map, bx, -by)
           line:Show()
         end
       end
@@ -302,8 +308,20 @@ local function DrawRoute()
   end)
   local from = picks.from or (answer and answer.from) or (EW.Travel and EW.Travel.Here()) or nil
   local to = picks.to or (answer and answer.to) or nil
-  PlaceMarker(map, map.here, from)
-  PlaceMarker(map, map.goal, to)
+  local hereX, hereY
+  -- With no start picked, the real map knows where the character itself
+  -- stands, which is better than the middle of its zone.
+  if not picks.from and map.PlayerPixel then hereX, hereY = map.PlayerPixel() end
+  if hereX then
+    PlaceMarker(map, map.here, hereX, hereY, from or "player")
+  else
+    local x, y
+    if from then x, y = map.Pixel(from) end
+    PlaceMarker(map, map.here, x, y, from)
+  end
+  local goalX, goalY
+  if to then goalX, goalY = map.Pixel(to) end
+  PlaceMarker(map, map.goal, goalX, goalY, to)
   -- The words beside the green ring: where the character is, or where the
   -- trip was told to start.
   if map.here.node then
@@ -484,99 +502,57 @@ local function Pickable(button, node, name, kind)
   button:SetScript("OnLeave", HideMapTip)
 end
 
---[[
-The map: the sea, each zone's outline in the color of whose land it is,
-each zone's name, and a dot for every place. Returns the map's frame. The
-outlines need the client's line drawing; where it has none, the names and
-the dots are drawn without them.
-]]
-local function BuildMap(frame, left, top, width, height)
-  local T, M = EW.TRAVEL, EW.TRAVEL_MAP
-  local map = CreateFrame("Frame", nil, frame)
-  map:SetSize(width, height)
-  map:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
-  pcall(function() map:SetClipsChildren(true) end)
-  local sea = map:CreateTexture(nil, "BACKGROUND")
-  sea:SetAllPoints(map)
-  sea:SetColorTexture(0.04, 0.07, 0.11, 1)
-  local scale = height / M.height
-  map.scale = scale
-  map.lines, map.route, map.pins, map.zones = 0, {}, {}, {}
-
+--[[ A zone's name on a map, at a spot in pixels. A name is a button: a
+     click picks the zone. ]]
+local function MakeZoneName(map, key, x, y, level)
+  local zone = EW.TRAVEL.ZONES[key]
+  local color = ZONE_COLORS[zone.faction] or ZONE_COLORS.none
+  local button = CreateFrame("Button", nil, map)
+  button:SetSize(#zone.name * 5.8 + 4, 11)
+  button:SetPoint("CENTER", map, "TOPLEFT", x, -y)
+  pcall(function() button:SetFrameLevel(level) end)
+  local text = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  text:SetPoint("CENTER", button, "CENTER", 0, 0)
   pcall(function()
-    for _, key in ipairs(T.ZONE_ORDER) do
-      local zone = T.ZONES[key]
-      local color = ZONE_COLORS[zone.faction] or ZONE_COLORS.none
-      for _, ring in ipairs(M.OUTLINES[key] or {}) do
-        local count = #ring / 2
-        for index = 1, count do
-          local after = index % count + 1
-          local line = map:CreateLine(nil, "BORDER")
-          line:SetThickness(1.2)
-          line:SetColorTexture(color[1], color[2], color[3], 0.8)
-          line:SetStartPoint("TOPLEFT", map, ring[index * 2 - 1] * scale, -ring[index * 2] * scale)
-          line:SetEndPoint("TOPLEFT", map, ring[after * 2 - 1] * scale, -ring[after * 2] * scale)
-          map.lines = map.lines + 1
-        end
-      end
-    end
+    local font = text:GetFont()
+    text:SetFont(font, 9, "OUTLINE")
   end)
+  text:SetText(zone.name)
+  text:SetTextColor(color[1], color[2], color[3], 1)
+  pcall(function() button:SetSize(math.max(24, text:GetStringWidth() + 2), 11) end)
+  button.text = text
+  Pickable(button, "zone:" .. key, zone.name, "Zone")
+  return button
+end
 
-  local baseLevel = 1
-  pcall(function() baseLevel = map:GetFrameLevel() + 1 end)
+--[[ A place's dot on a map, at a spot in pixels. ]]
+local function MakePin(map, place, x, y, level, estimated)
+  local style = PIN_STYLES[place.kind] or PIN_STYLES.landmark
+  local pin = CreateFrame("Button", nil, map)
+  pin:SetSize(style.size, style.size)
+  pin:SetPoint("CENTER", map, "TOPLEFT", x, -y)
+  pcall(function() pin:SetFrameLevel(level + style.level) end)
+  local rim = pin:CreateTexture(nil, "BACKGROUND")
+  rim:SetPoint("TOPLEFT", pin, "TOPLEFT", -1, 1)
+  rim:SetPoint("BOTTOMRIGHT", pin, "BOTTOMRIGHT", 1, -1)
+  rim:SetTexture(MEDIA .. "dot")
+  rim:SetVertexColor(0, 0, 0, 0.9)
+  local dot = pin:CreateTexture(nil, "ARTWORK")
+  dot:SetAllPoints(pin)
+  dot:SetTexture(MEDIA .. "dot")
+  dot:SetVertexColor(style.color[1], style.color[2], style.color[3], 1)
+  pcall(function() pin:SetHighlightTexture(MEDIA .. "ring") end)
+  local zone = place.zone and EW.TRAVEL.ZONES[place.zone]
+  local what = zone and (style.label .. ", " .. zone.name) or style.label
+  if estimated then what = what .. " (its spot is an estimate)" end
+  Pickable(pin, "place:" .. place.key, place.name, what)
+  pin.estimated = estimated and true or false
+  return pin
+end
 
-  -- The zones' names. A name is a button: a click picks the zone.
-  local spots = EW.MapLabelSpots(scale)
-  for _, key in ipairs(T.ZONE_ORDER) do
-    local zone = T.ZONES[key]
-    local spot = spots[key]
-    if spot then
-      local color = ZONE_COLORS[zone.faction] or ZONE_COLORS.none
-      local button = CreateFrame("Button", nil, map)
-      button:SetSize(#zone.name * 5.8 + 4, 11)
-      button:SetPoint("CENTER", map, "TOPLEFT", spot[1], -spot[2])
-      pcall(function() button:SetFrameLevel(baseLevel) end)
-      local text = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      text:SetPoint("CENTER", button, "CENTER", 0, 0)
-      pcall(function()
-        local font = text:GetFont()
-        text:SetFont(font, 9, "OUTLINE")
-      end)
-      text:SetText(zone.name)
-      text:SetTextColor(color[1], color[2], color[3], 1)
-      pcall(function() button:SetSize(math.max(24, text:GetStringWidth() + 2), 11) end)
-      button.text = text
-      Pickable(button, "zone:" .. key, zone.name, "Zone")
-      map.zones[key] = button
-    end
-  end
-
-  -- The places, each a dot.
-  for _, place in ipairs(T.PLACES) do
-    local x, y = EW.MapPoint(place.x, place.y)
-    if x then
-      local style = PIN_STYLES[place.kind] or PIN_STYLES.landmark
-      local pin = CreateFrame("Button", nil, map)
-      pin:SetSize(style.size, style.size)
-      pin:SetPoint("CENTER", map, "TOPLEFT", x * scale, -y * scale)
-      pcall(function() pin:SetFrameLevel(baseLevel + style.level) end)
-      local rim = pin:CreateTexture(nil, "BACKGROUND")
-      rim:SetPoint("TOPLEFT", pin, "TOPLEFT", -1, 1)
-      rim:SetPoint("BOTTOMRIGHT", pin, "BOTTOMRIGHT", 1, -1)
-      rim:SetTexture(MEDIA .. "dot")
-      rim:SetVertexColor(0, 0, 0, 0.9)
-      local dot = pin:CreateTexture(nil, "ARTWORK")
-      dot:SetAllPoints(pin)
-      dot:SetTexture(MEDIA .. "dot")
-      dot:SetVertexColor(style.color[1], style.color[2], style.color[3], 1)
-      pcall(function() pin:SetHighlightTexture(MEDIA .. "ring") end)
-      local zone = place.zone and T.ZONES[place.zone]
-      Pickable(pin, "place:" .. place.key, place.name, zone and (style.label .. ", " .. zone.name) or style.label)
-      map.pins[place.key] = pin
-    end
-  end
-
-  -- The two rings: where the trip starts, and where it ends.
+--[[ What every map carries over its picture: the two rings, the key, and
+     the line that says how to use it. ]]
+local function FinishMap(map)
   local function Ring(size, r, g, b)
     local ring = map:CreateTexture(nil, "OVERLAY")
     ring:SetSize(size, size)
@@ -591,6 +567,13 @@ local function BuildMap(frame, left, top, width, height)
   map.hereText:SetPoint("BOTTOM", map.here, "TOP", 0, 1)
   map.hereText:SetTextColor(0.3, 1, 0.4, 1)
   map.hereText:Hide()
+
+  -- A dark band along the foot, so the key reads over any picture.
+  local band = map:CreateTexture(nil, "BORDER")
+  band:SetPoint("BOTTOMLEFT", map, "BOTTOMLEFT", 0, 0)
+  band:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", 0, 0)
+  band:SetHeight(36)
+  band:SetColorTexture(0, 0, 0, 0.7)
 
   -- The key: what each color of dot is.
   map.key = {}
@@ -616,14 +599,205 @@ local function BuildMap(frame, left, top, width, height)
   hint:SetPoint("BOTTOMLEFT", map, "BOTTOMLEFT", 6, 6)
   hint:SetText("Click a place to go there from where you stand. Right-click a place to start from it instead.")
   map.hint = hint
+end
+
+--[[
+The game's own map, a continent at a time. The pictures are the client's
+own, asked for by the continent's number and laid out as the client lays
+them out; every place is a dot where the client says the place is, and the
+green ring is where the character really stands. A button for each
+continent sits in the corner. Returns nil where the client cannot give
+the pictures or cannot place the zones, and the drawn map is used instead.
+]]
+local function BuildRealMap(frame, left, top, width, height)
+  local T, P = EW.TRAVEL, EW.Places
+  if not P then return nil end
+  local continents = P.Continents()
+  if #continents == 0 then return nil end
+  local tilesOf = {}
+  for _, continent in ipairs(continents) do
+    local tiles = P.Tiles(continent.map)
+    if not tiles then return nil end
+    tilesOf[continent.map] = tiles
+  end
+
+  local map = CreateFrame("Frame", nil, frame)
+  map:SetSize(width, height)
+  map:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
+  pcall(function() map:SetClipsChildren(true) end)
+  local sea = map:CreateTexture(nil, "BACKGROUND", nil, -8)
+  sea:SetAllPoints(map)
+  sea:SetColorTexture(0.04, 0.07, 0.11, 1)
+  map.real = true
+  map.lines, map.route, map.sheets, map.tabs = 0, {}, {}, {}
+  map.pins, map.zones = {}, {}
+
+  local baseLevel = 1
+  pcall(function() baseLevel = map:GetFrameLevel() + 1 end)
+
+  --[[ One continent's sheet: its pictures, its dots and its names, made
+       the first time the continent is shown. ]]
+  local function Sheet(continent)
+    local sheet = map.sheets[continent.map]
+    if sheet then return sheet end
+    sheet = { map = continent.map, tiles = {}, pins = {}, zones = {} }
+    for _, tile in ipairs(tilesOf[continent.map]) do
+      local picture = map:CreateTexture(nil, "BACKGROUND", nil, 1)
+      picture:SetSize(tile.width * width, tile.height * height)
+      picture:SetPoint("TOPLEFT", map, "TOPLEFT", tile.left * width, -tile.top * height)
+      picture:SetTexture(tile.file)
+      sheet.tiles[#sheet.tiles + 1] = picture
+    end
+    local taken = {}
+    for _, place in ipairs(T.PLACES) do
+      local x, y, estimated = P.Spot(place.key, continent.map)
+      if x then
+        local style = PIN_STYLES[place.kind] or PIN_STYLES.landmark
+        sheet.pins[place.key] = MakePin(map, place, x * width, y * height, baseLevel, estimated)
+        taken[#taken + 1] = { x * width, y * height, style.size + 2, style.size + 2 }
+      end
+    end
+    for _, key in ipairs(T.ZONE_ORDER) do
+      local x, y = P.ZoneSpot(key, continent.map)
+      if x then
+        local nameX, nameY = EW.MapNameSpot(taken, x * width, y * height, T.ZONES[key].name)
+        sheet.zones[key] = MakeZoneName(map, key, nameX, nameY, baseLevel)
+      end
+    end
+    map.sheets[continent.map] = sheet
+    return sheet
+  end
+
+  local function ShowSheet(sheet, shown)
+    for _, list in ipairs({ sheet.tiles, sheet.pins, sheet.zones }) do
+      for _, widget in pairs(list) do
+        if shown then widget:Show() else widget:Hide() end
+      end
+    end
+  end
+
+  --[[ Shows one continent and puts the others away. ]]
+  function map.Show(continentMap)
+    local chosen
+    for _, continent in ipairs(continents) do
+      if continent.map == continentMap then chosen = continent end
+    end
+    if not chosen then return false end
+    for _, sheet in pairs(map.sheets) do ShowSheet(sheet, false) end
+    local sheet = Sheet(chosen)
+    ShowSheet(sheet, true)
+    map.shown, map.pins, map.zones = chosen.map, sheet.pins, sheet.zones
+    for _, tab in ipairs(map.tabs) do
+      pcall(function()
+        if tab.continent == chosen.map then tab:LockHighlight() else tab:UnlockHighlight() end
+      end)
+    end
+    pcall(DrawRoute)
+    return true
+  end
+
+  function map.Pixel(node)
+    local x, y = P.NodeSpot(node, map.shown)
+    if not x then return nil end
+    return x * width, y * height
+  end
+
+  function map.PlayerPixel()
+    local x, y = P.Player(map.shown)
+    if not x then return nil end
+    return x * width, y * height
+  end
+
+  -- A button for each continent, in the top left corner.
+  local tabLeft = 6
+  for _, continent in ipairs(continents) do
+    local tab = CreateFrame("Button", nil, map, "UIPanelButtonTemplate")
+    local tabWidth = math.max(70, #tostring(continent.name) * 7 + 20)
+    tab:SetSize(tabWidth, 20)
+    tab:SetPoint("TOPLEFT", map, "TOPLEFT", tabLeft, -6)
+    tab:SetText(continent.name)
+    pcall(function() tab:SetFrameLevel(baseLevel + 20) end)
+    tab.continent = continent.map
+    tab:SetScript("OnClick", function() pcall(map.Show, continent.map) end)
+    map.tabs[#map.tabs + 1] = tab
+    tabLeft = tabLeft + tabWidth + 4
+  end
+
+  FinishMap(map)
+
+  -- Open on the continent the character is on.
+  local first = P.PlayerContinent()
+  if not map.Show(first) then map.Show(continents[1].map) end
+  return map
+end
+
+--[[
+The drawn map: the sea, each zone's outline in the color of whose land it
+is, each zone's name, and a dot for every place, all where the site's own
+map draws them. It stands in where the client cannot give its own map's
+pictures. The outlines need the client's line drawing; where it has none,
+the names and the dots are drawn without them.
+]]
+local function BuildMap(frame, left, top, width, height)
+  local T, M = EW.TRAVEL, EW.TRAVEL_MAP
+  local map = CreateFrame("Frame", nil, frame)
+  map:SetSize(width, height)
+  map:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
+  pcall(function() map:SetClipsChildren(true) end)
+  local sea = map:CreateTexture(nil, "BACKGROUND")
+  sea:SetAllPoints(map)
+  sea:SetColorTexture(0.04, 0.07, 0.11, 1)
+  local scale = math.min(height / M.height, width / M.width)
+  map.scale = scale
+  map.real = false
+  map.lines, map.route, map.pins, map.zones = 0, {}, {}, {}
+
+  function map.Pixel(node)
+    local x, y = EW.MapNodePoint(node)
+    if not x then return nil end
+    return x * scale, y * scale
+  end
+
+  pcall(function()
+    for _, key in ipairs(T.ZONE_ORDER) do
+      local zone = T.ZONES[key]
+      local color = ZONE_COLORS[zone.faction] or ZONE_COLORS.none
+      for _, ring in ipairs(M.OUTLINES[key] or {}) do
+        local count = #ring / 2
+        for index = 1, count do
+          local after = index % count + 1
+          local line = map:CreateLine(nil, "BORDER")
+          line:SetThickness(1.2)
+          line:SetColorTexture(color[1], color[2], color[3], 0.8)
+          line:SetStartPoint("TOPLEFT", map, ring[index * 2 - 1] * scale, -ring[index * 2] * scale)
+          line:SetEndPoint("TOPLEFT", map, ring[after * 2 - 1] * scale, -ring[after * 2] * scale)
+          map.lines = map.lines + 1
+        end
+      end
+    end
+  end)
+
+  local baseLevel = 1
+  pcall(function() baseLevel = map:GetFrameLevel() + 1 end)
+
+  local spots = EW.MapLabelSpots(scale)
+  for _, key in ipairs(T.ZONE_ORDER) do
+    local spot = spots[key]
+    if spot then map.zones[key] = MakeZoneName(map, key, spot[1], spot[2], baseLevel) end
+  end
+  for _, place in ipairs(T.PLACES) do
+    local x, y = EW.MapPoint(place.x, place.y)
+    if x then map.pins[place.key] = MakePin(map, place, x * scale, y * scale, baseLevel, false) end
+  end
+
+  FinishMap(map)
   return map
 end
 
 local function BuildWindow()
   local forever = EW.VersionKey() == "forever" and EW.TRAVEL ~= nil and EW.TRAVEL_MAP ~= nil
   local mapHeight = EW.WINDOW_MAP_HEIGHT
-  local mapWidth = 636
-  if EW.TRAVEL_MAP then mapWidth = math.floor(mapHeight * EW.TRAVEL_MAP.width / EW.TRAVEL_MAP.height) end
+  local mapWidth = EW.WINDOW_MAP_WIDTH
   local side = EW.WINDOW_SIDE_WIDTH
   local width = 14 + mapWidth + 12 + side + 14
   local height = 64 + mapHeight + 14
@@ -690,7 +864,13 @@ local function BuildWindow()
 
   -- The Route page: the map on the left.
   if forever then
-    local ok, map = pcall(BuildMap, frame, 14, -64, mapWidth, mapHeight)
+    -- The game's own map where the client can give it, the drawn one where
+    -- it cannot.
+    local ok, map = pcall(BuildRealMap, frame, 14, -64, mapWidth, mapHeight)
+    if not ok then EW.realMapError = tostring(map) end
+    if not ok or not map then
+      ok, map = pcall(BuildMap, frame, 14, -64, mapWidth, mapHeight)
+    end
     if ok and map then
       frame.map = Route(map)
     else
