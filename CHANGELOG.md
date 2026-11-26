@@ -2,6 +2,13 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.4.2** mends two things the first look at the real map showed.
+
+- **The map came back blank.** After a look at the Recorded page, the Route page's map was gone. The window kept its "show this continent" under the name of the frame's own call that shows it, so the map, once put away, could not be shown again. It has a name of its own now, and a test holds every such name clear of the frame's own.
+- **The minimap button was too big.** The mark is drawn at the size the game's own round buttons are; the button around it stays a little larger so it is easy to hit.
+- **Zone names.** They are set a little further apart on the map, so fewer lie on one another.
+- **The version and the tests.** Both tables of contents carry `## Version: 0.4.2`. The tests leave the Route page and come back to it on each continent, and read the button's size; the suite reads 3,028 assertions, from 2,983, under Lua 5.1 and 5.4.
+
 **0.4.1** times the boats, zeppelins and the tram. The site's map guesses how long each line takes; now each ride you take is written down, as each flight already is, so the guesses can be replaced by what the ride really took.
 
 - **`Rides.lua`.** One ride is one observation of the new kind `transit`: where it began, the seconds from setting off to coming to rest to a tenth, your faction, where it ended, and how many loading screens it passed through. Nothing else of the player is in it.

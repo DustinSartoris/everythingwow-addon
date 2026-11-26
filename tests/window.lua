@@ -23,6 +23,7 @@ return function(t)
       if key == "SetScript" then return function(self, which, handler) self.scripts[which] = handler end end
       if key == "SetPoint" then return function(self, ...) self.point = { ... } end end
       if key == "SetTexture" then return function(self, texture) self.texture = texture end end
+      if key == "SetSize" then return function(self, width, height) self.size = { width, height } end end
       if key == "SetStartPoint" then return function(self, ...) self.startPoint = { ... } end end
       if key == "SetEndPoint" then return function(self, ...) self.endPoint = { ... } end end
       if key == "CreateFontString" or key == "CreateTexture" or key == "CreateMaskTexture" then
@@ -295,6 +296,8 @@ return function(t)
   equal("anchored to the minimap", button.point[2], _G.Minimap)
   equal("it is one picture, the site's mark cut round with its rim", button.icon.texture, "Interface\\AddOns\\EverythingWoW\\Media\\minimap")
   check("set in the middle of the button", button.icon.point[1] == "CENTER" and button.icon.point[2] == button and button.icon.point[4] == 0 and button.icon.point[5] == 0)
+  check("at the size of the game's own round buttons, inside a button a little larger",
+    button.icon.size[1] == 24 and button.icon.size[2] == 24 and button.size[1] == 31)
   equal("with no ring apart from it to fall out of line", button.ring, nil)
   equal("with no size to read it sits 80 from the middle", EW.MinimapRadius(), 80)
   _G.Minimap.GetWidth = function() return 140 end
@@ -397,7 +400,7 @@ return function(t)
   check("where the client gives its pictures, the window shows the game's own map",
     realMap ~= nil and realMap.real == true, tostring(real.realMapError or real.mapError))
   local mapWide, mapHigh = real.WINDOW_MAP_WIDTH, real.WINDOW_MAP_HEIGHT
-  equal("it opens on the continent the character is on", realMap.shown, world.KALIMDOR)
+  equal("it opens on the continent the character is on", realMap.continent, world.KALIMDOR)
   equal("with a button for each continent", #realMap.tabs, 2)
   equal("named as the client names it", realMap.tabs[2].text, "Eastern Kingdoms")
   local west = realMap.sheets[world.KALIMDOR]
@@ -427,7 +430,7 @@ return function(t)
     near(realMap.goal.point[4], ratchetX * mapWide) and near(realMap.goal.point[5], -ratchetY * mapHigh))
 
   click(realMap.tabs[2])
-  equal("the second button shows the other continent", realMap.shown, world.EASTERN)
+  equal("the second button shows the other continent", realMap.continent, world.EASTERN)
   equal("the first continent's dots are put away", west.pins.orgrimmar:IsShown(), false)
   equal("and its pictures", west.tiles[1]:IsShown(), false)
   check("the other continent's dots are there", realMap.pins.undercity ~= nil and realMap.pins.undercity:IsShown() == true)
@@ -443,6 +446,28 @@ return function(t)
   equal("with the second's dots put away", realMap.sheets[world.EASTERN].pins.undercity:IsShown(), false)
   equal("and the green ring on the character again", realMap.here:IsShown(), true)
   equal("the destination is on the other side, so no gold ring here", realMap.goal:IsShown(), false)
+
+  -- Nothing the window keeps on a frame may take the name of one of the
+  -- frame's own calls: 0.4.0 kept its "show this continent" under Show, and
+  -- the map could not be shown again once the Route page had been left.
+  for _, own in ipairs({ "Show", "Hide", "IsShown", "SetPoint", "SetSize", "SetScript", "GetParent", "SetShown", "IsVisible", "SetScale", "GetWidth", "GetHeight", "Enable", "Disable", "SetText", "GetText", "Clear", "Raise", "Lower" }) do
+    check("the map keeps nothing under the frame's own " .. own, rawget(realMap, own) == nil)
+    check("nor the window", rawget(real.window, own) == nil)
+  end
+
+  -- Leaving the Route page and coming back brings the real map back.
+  real.ShowWindow("recorded")
+  equal("the Recorded page puts the real map away", realMap:IsShown(), false)
+  real.ShowWindow("route")
+  equal("and coming back to the Route page shows it again", realMap:IsShown(), true)
+  equal("on the continent it was on", realMap.continent, world.KALIMDOR)
+  equal("with its dots", realMap.pins.orgrimmar:IsShown(), true)
+  click(realMap.tabs[2])
+  real.ShowWindow("recorded")
+  real.ShowWindow("route")
+  equal("or on the other, if that was the one shown", realMap.continent, world.EASTERN)
+  equal("still there", realMap:IsShown(), true)
+  click(realMap.tabs[1])
 
   -- A client whose pictures do not fill their rows gets the drawn map.
   world.files = 11

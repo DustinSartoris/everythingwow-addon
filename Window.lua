@@ -137,9 +137,10 @@ end
      so far, each { x, y, width, height } about its middle, and gains this
      name's own. ]]
 function EW.MapNameSpot(taken, x, y, name)
-  local width, height = #name * 5.8 + 4, 11
+  -- A little wider than the name is drawn, so two names do not touch.
+  local width, height = #name * 6.4 + 8, 11
   local best, bestHits = 0, nil
-  for _, move in ipairs({ 0, 11, -11, 21, -21 }) do
+  for _, move in ipairs({ 0, 11, -11, 22, -22, 33, -33 }) do
     local hits = 0
     for _, box in ipairs(taken) do
       if math.abs(x - box[1]) * 2 < width + box[3] and math.abs(y + move - box[2]) * 2 < height + box[4] then
@@ -286,8 +287,8 @@ local function DrawRoute()
     local used = 0
     if answer and answer.ok and answer.plan then
       for _, step in ipairs(answer.plan.steps) do
-        local ax, ay = map.Pixel(step.fromNode)
-        local bx, by = map.Pixel(step.toNode)
+        local ax, ay = map.pixelOf(step.fromNode)
+        local bx, by = map.pixelOf(step.toNode)
         if ax and bx and (ax ~= bx or ay ~= by) then
           local line = map.route[used + 1]
           if not line then
@@ -312,16 +313,16 @@ local function DrawRoute()
   local hereX, hereY
   -- With no start picked, the real map knows where the character itself
   -- stands, which is better than the middle of its zone.
-  if not picks.from and map.PlayerPixel then hereX, hereY = map.PlayerPixel() end
+  if not picks.from and map.playerPixel then hereX, hereY = map.playerPixel() end
   if hereX then
     PlaceMarker(map, map.here, hereX, hereY, from or "player")
   else
     local x, y
-    if from then x, y = map.Pixel(from) end
+    if from then x, y = map.pixelOf(from) end
     PlaceMarker(map, map.here, x, y, from)
   end
   local goalX, goalY
-  if to then goalX, goalY = map.Pixel(to) end
+  if to then goalX, goalY = map.pixelOf(to) end
   PlaceMarker(map, map.goal, goalX, goalY, to)
   -- The words beside the green ring: where the character is, or where the
   -- trip was told to start.
@@ -677,8 +678,10 @@ local function BuildRealMap(frame, left, top, width, height)
     end
   end
 
-  --[[ Shows one continent and puts the others away. ]]
-  function map.Show(continentMap)
+  --[[ Shows one continent and puts the others away. It must not be named
+       Show: that is the frame's own, which the window calls to bring the
+       whole map back when the Route page is returned to. ]]
+  function map.showContinent(continentMap)
     local chosen
     for _, continent in ipairs(continents) do
       if continent.map == continentMap then chosen = continent end
@@ -687,7 +690,7 @@ local function BuildRealMap(frame, left, top, width, height)
     for _, sheet in pairs(map.sheets) do ShowSheet(sheet, false) end
     local sheet = Sheet(chosen)
     ShowSheet(sheet, true)
-    map.shown, map.pins, map.zones = chosen.map, sheet.pins, sheet.zones
+    map.continent, map.pins, map.zones = chosen.map, sheet.pins, sheet.zones
     for _, tab in ipairs(map.tabs) do
       pcall(function()
         if tab.continent == chosen.map then tab:LockHighlight() else tab:UnlockHighlight() end
@@ -697,14 +700,14 @@ local function BuildRealMap(frame, left, top, width, height)
     return true
   end
 
-  function map.Pixel(node)
-    local x, y = P.NodeSpot(node, map.shown)
+  function map.pixelOf(node)
+    local x, y = P.NodeSpot(node, map.continent)
     if not x then return nil end
     return x * width, y * height
   end
 
-  function map.PlayerPixel()
-    local x, y = P.Player(map.shown)
+  function map.playerPixel()
+    local x, y = P.Player(map.continent)
     if not x then return nil end
     return x * width, y * height
   end
@@ -719,7 +722,7 @@ local function BuildRealMap(frame, left, top, width, height)
     tab:SetText(continent.name)
     pcall(function() tab:SetFrameLevel(baseLevel + 20) end)
     tab.continent = continent.map
-    tab:SetScript("OnClick", function() pcall(map.Show, continent.map) end)
+    tab:SetScript("OnClick", function() pcall(map.showContinent, continent.map) end)
     map.tabs[#map.tabs + 1] = tab
     tabLeft = tabLeft + tabWidth + 4
   end
@@ -728,7 +731,7 @@ local function BuildRealMap(frame, left, top, width, height)
 
   -- Open on the continent the character is on.
   local first = P.PlayerContinent()
-  if not map.Show(first) then map.Show(continents[1].map) end
+  if not map.showContinent(first) then map.showContinent(continents[1].map) end
   return map
 end
 
@@ -753,7 +756,7 @@ local function BuildMap(frame, left, top, width, height)
   map.real = false
   map.lines, map.route, map.pins, map.zones = 0, {}, {}, {}
 
-  function map.Pixel(node)
+  function map.pixelOf(node)
     local x, y = EW.MapNodePoint(node)
     if not x then return nil end
     return x * scale, y * scale
@@ -1030,6 +1033,7 @@ end
 --------------------------------------------------------------------------
 
 EW.MINIMAP_ANGLE = 215
+EW.MINIMAP_ICON_SIZE = 24
 
 --[[ A small round button on the edge of the minimap: a click opens or
      closes the window, a drag moves it round the edge, and /ewow minimap
@@ -1078,8 +1082,8 @@ end
 
 --[[
 The button is one picture: everythingwow.com's mark, cut round, with its
-gold rim drawn on it. It is set in the middle of the button and fills it,
-so there are no parts for a client to set apart from one another, which is
+gold rim drawn on it. It is set in the middle of the button, at the size
+the game's own round buttons are, so there are no parts for a client to set apart from one another, which is
 how 0.3.3's ring and icon came out of line.
 ]]
 local function BuildMinimapButton()
@@ -1090,7 +1094,9 @@ local function BuildMinimapButton()
   local icon = button:CreateTexture(nil, "ARTWORK")
   icon:SetTexture(MEDIA .. "minimap")
   icon:SetPoint("CENTER", button, "CENTER", 0, 0)
-  icon:SetSize(31, 31)
+  -- The game's own round buttons show a ring about this wide; the button
+  -- itself stays a little larger so it is easy to hit.
+  icon:SetSize(EW.MINIMAP_ICON_SIZE, EW.MINIMAP_ICON_SIZE)
   button.icon = icon
   pcall(function()
     button:SetHighlightTexture(MEDIA .. "ring")
