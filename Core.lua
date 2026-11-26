@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.4.2"
+EW.ADDON_VERSION = "0.4.3"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -1191,6 +1191,9 @@ local function Status()
   local ignores = ReasonLine(db.ignores)
   if ignores then EW.Print("  ignored: " .. ignores) end
   EW.Print("Only skipped is a loss. Deduped and ignored are the addon working as it should.")
+  -- How far the two travel recorders have got this session, from 0.4.3.
+  if EW.FlightReport then EW.Print(EW.FlightReport()) end
+  if EW.RideReport then EW.Print(EW.RideReport()) end
   EW.Print("Upload the file at https://everythingwow.com/addons/companion/upload")
 end
 

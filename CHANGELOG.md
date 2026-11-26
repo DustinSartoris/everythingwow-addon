@@ -2,6 +2,13 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.4.3** mends the flight recorder, which had never written a flight in the game.
+
+- **Why no flight was written.** The recorder waited for the client to say that control of the character had come back, and asked there and then whether the character was still on the taxi. The real client still answers yes at that moment and stops a moment later, so the recorder took every landing for a stop on the way, kept the flight in the air for good, and wrote nothing. An upload of 26 November 2026 from 0.4.1 held 1,383 observations and not one flight.
+- **How it lands now.** After the takeoff the recorder asks four times a second whether the character is still on the taxi, and the first no is the landing, timed to the moment control came back. The takeoff is confirmed the same way, for up to five seconds. An answer the client will not give is passed over and asked again.
+- **A line to see by.** `/ewow status` and the window's Recorded page now say how far the two travel recorders have got this session: flight maps opened, destinations picked, takeoffs, landings and flights written, with the reason the last one was not; and for rides, the looks taken, the looks unanswered, the rides begun and written.
+- **The version and the tests.** Both tables of contents carry `## Version: 0.4.3`. The tests land a flight in the real client's order, which fails on the old recorder, keep a flight through answers the client holds back, and read both lines; the suite reads 3,039 assertions, from 3,028, under Lua 5.1 and 5.4.
+
 **0.4.2** mends two things the first look at the real map showed.
 
 - **The map came back blank.** After a look at the Recorded page, the Route page's map was gone. The window kept its "show this continent" under the name of the frame's own call that shows it, so the map, once put away, could not be shown again. It has a name of its own now, and a test holds every such name clear of the frame's own.

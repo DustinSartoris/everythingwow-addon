@@ -13,6 +13,7 @@ return function(t)
 
   local EW = t.LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
   equal("with no ticker to give, the recorder registers nothing", EW.RIDES_STARTED, false)
+  equal("and its status line says so", EW.RideReport(), "ride recorder: off on this client")
 
   local function rides()
     local found = {}
@@ -284,6 +285,10 @@ return function(t)
   rawset(_G, "GetUnitSpeed", function() return 0 end)
   local forever = t.LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
   equal("on WoW Forever, with a ticker and a position to read, it starts", forever.RIDES_STARTED, true)
+  equal("its status line begins at nothing seen", forever.RideReport(), "ride recorder: looks 0, unanswered 0, rides begun 0, written 0")
+  forever.RideLook({ t = 1, x = 0, y = 0, instance = 1, own = 0 })
+  forever.RideLook({ t = 1.5, instance = 1, own = 0 })
+  equal("and counts the looks, answered and not", forever.RideReport(), "ride recorder: looks 2, unanswered 1, rides begun 0, written 0")
   local startedOnForever = started
   local era = t.LoadFreshAddon(2, { "1.15.9", "50000", "Sep 17 2026", 11509 })
   equal("on Classic Era it does not", era.RIDES_STARTED, false)

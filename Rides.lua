@@ -56,6 +56,11 @@ EW.RIDE_LOOK_SECONDS = 0.5
 -- The last look, the looks that showed it running, and the ride in hand.
 local last, streak, first, ride = nil, 0, nil, nil
 
+-- What the recorder has seen this session, for /ewow status: it says how
+-- far a ride got when none was written.
+local counts = { looks = 0, unanswered = 0, begun = 0, written = 0 }
+local lastReason = nil
+
 local function Faction()
   local faction
   pcall(function() faction = UnitFactionGroup("player") end)
@@ -81,15 +86,24 @@ local function Finish(look)
   ride, streak, first = nil, 0, nil
   if not done then return false end
   local seconds = done.lastFast - done.depart
-  if seconds < EW.RIDE_MIN_SECONDS or seconds > EW.RIDE_MAX_SECONDS then return false end
+  if seconds < EW.RIDE_MIN_SECONDS or seconds > EW.RIDE_MAX_SECONDS then
+    lastReason = "shorter than half a minute or longer than a quarter of an hour"
+    return false
+  end
   if done.loads == 0 then
     local dx, dy = done.lastX - done.x, done.lastY - done.y
-    if dx * dx + dy * dy < EW.RIDE_MIN_YARDS * EW.RIDE_MIN_YARDS then return false end
+    if dx * dx + dy * dy < EW.RIDE_MIN_YARDS * EW.RIDE_MIN_YARDS then
+      lastReason = "it ended where it began"
+      return false
+    end
   end
   local faction = Faction()
-  if not faction then return false end
+  if not faction then
+    lastReason = "the character has no faction"
+    return false
+  end
   local endMap, endX, endY = look.map, look.mapX, look.mapY
-  EW.Record("transit", "transit", nil, done.map, done.mapX, done.mapY, {
+  local written = EW.Record("transit", "transit", nil, done.map, done.mapX, done.mapY, {
     s = EW.Round(seconds, 1),
     f = faction,
     tm = endMap,
@@ -97,7 +111,22 @@ local function Finish(look)
     ty = endY,
     n = done.loads,
   })
+  if written == false then
+    lastReason = "the file would not take it"
+    return false
+  end
+  counts.written = counts.written + 1
+  lastReason = nil
   return true
+end
+
+--[[ One line for /ewow status: how far rides have got this session. ]]
+function EW.RideReport()
+  if not EW.RIDES_STARTED then return "ride recorder: off on this client" end
+  local line = string.format("ride recorder: looks %d, unanswered %d, rides begun %d, written %d",
+    counts.looks, counts.unanswered, counts.begun, counts.written)
+  if lastReason then line = line .. " (last not written: " .. lastReason .. ")" end
+  return line
 end
 
 --[[
@@ -115,7 +144,9 @@ function EW.RideLook(look)
     Forget()
     return nil
   end
+  counts.looks = counts.looks + 1
   if type(look.x) ~= "number" or type(look.y) ~= "number" then
+    counts.unanswered = counts.unanswered + 1
     -- The client would not say where the character is. A ride in hand is
     -- kept for a while; anything just beginning is dropped.
     last, streak, first = nil, 0, nil
@@ -176,6 +207,7 @@ function EW.RideLook(look)
         loads = 0,
       }
       streak, first = 0, nil
+      counts.begun = counts.begun + 1
       return "ride"
     end
   else

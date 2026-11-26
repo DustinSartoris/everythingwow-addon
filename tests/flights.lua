@@ -70,9 +70,20 @@ return function(t)
     stub.Fire("PLAYER_CONTROL_LOST")
     if options.midway then options.midway() end
     clock = clock + seconds
-    onTaxi = false
     at(options.landMap or 1413, 0.5161, 0.3043)
-    stub.Fire("PLAYER_CONTROL_GAINED")
+    if options.lateTaxi then
+      -- The real client's order: control comes back first, and only a
+      -- moment later does it stop saying "on a taxi".
+      stub.Fire("PLAYER_CONTROL_GAINED")
+      stub.RunTimers(2)
+      clock = clock + options.lateTaxi
+      onTaxi = false
+    else
+      onTaxi = false
+      stub.Fire("PLAYER_CONTROL_GAINED")
+    end
+    -- The recorder asks again and again whether the taxi is over.
+    stub.RunTimers(30)
   end
 
   -- A plain flight.
@@ -93,12 +104,18 @@ return function(t)
   equal("the map it landed on", flight.payload.tm, 1413)
   equal("and where", flight.payload.tx, 0.5161)
   equal("to four places too", flight.payload.ty, 0.3043)
-  local inAir, picked = EW.FlightState()
-  check("nothing is left in the air or picked", inAir == nil and picked == nil)
+  local inAir, picked, waiting = EW.FlightState()
+  check("nothing is left in the air, picked or waiting", inAir == nil and picked == nil and waiting == nil)
+  check("the status line counts it", EW.FlightReport():find("takeoffs 1, landings 1, written 1", 1, true) ~= nil, EW.FlightReport())
 
-  -- The same flight again is a second measurement, not a repeat.
-  fly(2, 80)
-  equal("a second flight of the same pair is written too", #flights(), 2)
+  -- The same flight again is a second measurement, not a repeat. It lands
+  -- the way the real client lands: control back first, off the taxi after.
+  -- Until 0.4.3 that order left the flight in the air for good, and no
+  -- flight was ever written.
+  fly(2, 80, { lateTaxi = 0.4 })
+  equal("a flight whose taxi ends a moment after control comes back is written", #flights(), 2)
+  equal("timed to the moment control came back", flights()[2].payload.s, 80)
+  check("and nothing is left in the air after it", (EW.FlightState()) == nil)
 
   -- A stop on the way hands control back for a moment while still on the taxi.
   fly(3, 200, {
@@ -124,6 +141,7 @@ return function(t)
   equal("a loss of control long after the pick is not the takeoff", #flights(), before)
   fly(2, 90, { neverTaxi = true })
   equal("a loss of control the client never calls a taxi is not a flight", #flights(), before)
+  check("and the status line says why", EW.FlightReport():find("never said the character was on a taxi", 1, true) ~= nil, EW.FlightReport())
   fly(2, 90, { midway = function() TaxiRequestEarlyLanding() end })
   equal("a flight ended early is not the whole flight", #flights(), before)
   fly(2, 90, { midway = function() stub.Fire("PLAYER_LEAVING_WORLD") end })
@@ -154,6 +172,7 @@ return function(t)
   clock = clock + 70
   onTaxi = false
   stub.Fire("PLAYER_CONTROL_GAINED")
+  stub.RunTimers(5)
   equal("a taxi the client confirms a moment late is still a flight", #flights(), before + 1)
   before = before + 1
 
@@ -178,9 +197,29 @@ return function(t)
   clock = clock + 75
   onTaxi = false
   stub.Fire("PLAYER_CONTROL_GAINED")
+  stub.RunTimers(5)
   local last = flights()[#flights()]
   equal("with no position the flight is still written", last.payload.s, 75)
   equal("without a place", last.x, nil)
+
+  -- A client that holds "on a taxi" back from addons: the flight is not
+  -- ended on a value that cannot be read.
+  at(1454, 0.4512, 0.6388)
+  stub.Fire("TAXIMAP_OPENED")
+  TakeTaxiNode(2)
+  clock = clock + 1
+  onTaxi = true
+  stub.Fire("PLAYER_CONTROL_LOST")
+  clock = clock + 40
+  rawset(_G, "issecretvalue", function(value) return value == true or value == false end)
+  stub.RunTimers(5)
+  check("a flight is kept while the client will not say", (EW.FlightState()) ~= nil)
+  rawset(_G, "issecretvalue", nil)
+  clock = clock + 40
+  onTaxi = false
+  stub.Fire("PLAYER_CONTROL_GAINED")
+  stub.RunTimers(5)
+  equal("and written once it says the taxi is over", flights()[#flights()].payload.s, 80)
 
   -- The status line counts the kind like any other.
   stub.state.printed = {}

@@ -413,6 +413,10 @@ local function RefreshRecorded()
   else
     frame.none:Hide()
   end
+  local reports = {}
+  if EW.FlightReport then reports[#reports + 1] = EW.FlightReport() end
+  if EW.RideReport then reports[#reports + 1] = EW.RideReport() end
+  frame.travel:SetText(table.concat(reports, "\n"))
 end
 
 local function Refresh()
@@ -426,20 +430,33 @@ local function Refresh()
   end
 end
 
+--[[ Tells whoever else shows the trip, the world map and the tracker,
+     that it has changed. EW.trip is the answer in hand, or nil. ]]
+local function Tell()
+  EW.trip = answer
+  if EW.OnTrip then pcall(EW.OnTrip, answer) end
+end
+
+--[[ Plans the trip the picks and the boxes ask for. It works before the
+     window has ever been opened, for a pick made on the world map. ]]
 local function Plan()
-  if not window then return end
   local fromText, toText = "", ""
-  pcall(function()
-    fromText = window.from:GetText() or ""
-    toText = window.to:GetText() or ""
-  end)
+  if window then
+    pcall(function()
+      fromText = window.from:GetText() or ""
+      toText = window.to:GetText() or ""
+    end)
+  end
   answer = EW.RouteAnswer(fromText, toText, picks.from, picks.to)
   stepPage = 1
-  pcall(function()
-    window.from:ClearFocus()
-    window.to:ClearFocus()
-  end)
+  if window then
+    pcall(function()
+      window.from:ClearFocus()
+      window.to:ClearFocus()
+    end)
+  end
   Refresh()
+  Tell()
 end
 EW.WindowPlan = Plan
 
@@ -447,24 +464,29 @@ EW.WindowPlan = Plan
      right-click is where to start. The box takes its name, and the trip is
      planned at once. ]]
 function EW.WindowPick(node, mouseButton)
-  if not window or type(node) ~= "string" then return end
+  if type(node) ~= "string" then return end
   local name = (EW.Travel and EW.Travel.NodeName(node)) or ""
+  -- The boxes are written only where the window has been made; a pick on
+  -- the world map before that is kept, and the boxes take it when it is.
+  local function Box(which, text)
+    if window then pcall(function() window[which]:SetText(text) end) end
+  end
   if mouseButton == "RightButton" then
     picks.from = node
-    window.from:SetText(name)
+    Box("from", name)
     -- One place cannot be both ends: the newer pick stays and the other end
     -- is asked for again.
     if picks.to == node then
       picks.to = nil
-      window.to:SetText("")
+      Box("to", "")
     end
   else
     picks.to = node
-    window.to:SetText(name)
+    Box("to", name)
     -- The start goes back to where the character stands.
     if picks.from == node then
       picks.from = nil
-      window.from:SetText("")
+      Box("from", "")
     end
   end
   Plan()
@@ -472,15 +494,17 @@ end
 
 --[[ Empties both ends and the answer: the window as it first opened. ]]
 function EW.WindowClear()
-  if not window then return end
   picks.from, picks.to = nil, nil
   answer = nil
   stepPage = 1
-  pcall(function()
-    window.from:SetText("")
-    window.to:SetText("")
-  end)
+  if window then
+    pcall(function()
+      window.from:SetText("")
+      window.to:SetText("")
+    end)
+  end
   Refresh()
+  Tell()
 end
 
 --[[ The tooltip of a dot or a zone's name on the map. ]]
@@ -970,6 +994,10 @@ local function BuildWindow()
   frame.none = Recorded(Text("GameFontDisable"))
   frame.none:SetPoint("TOPLEFT", frame, "TOPLEFT", 24, -88)
   frame.none:SetText("Nothing yet. Play, and what you meet is written down.")
+  -- How far the two travel recorders have got this session.
+  frame.travel = Recorded(Text("GameFontDisableSmall"))
+  frame.travel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 78)
+  frame.travel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 78)
   local where = Recorded(Text("GameFontHighlightSmall"))
   where:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 14, 44)
   where:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 44)
@@ -1008,8 +1036,16 @@ end
 --[[ Opens the window on a page, "route" or "recorded". False where the
      client cannot build it. ]]
 function EW.ShowWindow(which)
+  local made = window == nil
   if not EnsureWindow() then return false end
   if which == "route" or which == "recorded" then page = which end
+  -- A pick made on the world map before the window existed goes into its box.
+  if made and EW.Travel then
+    pcall(function()
+      if picks.from then window.from:SetText(EW.Travel.NodeName(picks.from) or "") end
+      if picks.to then window.to:SetText(EW.Travel.NodeName(picks.to) or "") end
+    end)
+  end
   local ok = pcall(function()
     window:Show()
     Refresh()
