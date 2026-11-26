@@ -85,6 +85,8 @@ local STEP_COLORS = {
   ride = { 0.3, 0.95, 0.8 },
 }
 local STEP_COLOR = { 1, 0.82, 0.2 }
+-- The world map of WorldMap.lua draws the same dots and the same lines.
+EW.PIN_STYLES, EW.STEP_COLORS, EW.STEP_COLOR = PIN_STYLES, STEP_COLORS, STEP_COLOR
 
 local window, windowFailed = nil, false
 local page, stepPage = "route", 1
@@ -184,8 +186,10 @@ end
 Plans a trip. The two texts are what the boxes hold; the two nodes are what
 was picked on the map, and a picked node wins over its box. An empty From
 is where the character stands. Returns { ok = true, title, estimate, steps,
-plan, from, to } where a route was found and { ok = false, message }
-otherwise, with from and to where they were understood.
+plan, from, to, here } where a route was found and { ok = false, message }
+otherwise, with from and to where they were understood. here is true where
+the trip starts from where the character stands, which is the trip that
+follows the character as it goes.
 ]]
 function EW.RouteAnswer(fromText, toText, fromNode, toNode)
   local Travel = EW.Travel
@@ -194,6 +198,7 @@ function EW.RouteAnswer(fromText, toText, fromNode, toNode)
   end
   fromText, toText = Trim(fromText), Trim(toText)
   local from, to = fromNode, toNode
+  local here = false
   if not from and fromText ~= "" then from = Travel.Find(fromText) end
   if not to then
     if toText == "" then
@@ -203,6 +208,7 @@ function EW.RouteAnswer(fromText, toText, fromNode, toNode)
   end
   if not from and fromText == "" then
     from = Travel.Here()
+    here = true
     if not from then
       return {
         ok = false,
@@ -216,7 +222,7 @@ function EW.RouteAnswer(fromText, toText, fromNode, toNode)
   if not found then return { ok = false, from = from, to = to, message = lines[1] } end
   local steps = {}
   for index = 3, #lines do steps[#steps + 1] = lines[index] end
-  return { ok = true, title = lines[1], estimate = lines[2], steps = steps, plan = plan, from = from, to = to }
+  return { ok = true, title = lines[1], estimate = lines[2], steps = steps, plan = plan, from = from, to = to, here = here }
 end
 
 --[[ What the file holds: the rows of the Recorded page, a heading line
@@ -527,6 +533,7 @@ local function Pickable(button, node, name, kind)
   button:SetScript("OnEnter", ShowMapTip)
   button:SetScript("OnLeave", HideMapTip)
 end
+EW.MapPickable = Pickable
 
 --[[ A zone's name on a map, at a spot in pixels. A name is a button: a
      click picks the zone. ]]

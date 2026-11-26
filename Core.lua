@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.4.3"
+EW.ADDON_VERSION = "0.5.0"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -1270,6 +1270,12 @@ function EW.SlashCommand(message)
     Status()
   elseif command == "minimap" then
     if EW.MinimapCommand then EW.MinimapCommand() end
+  elseif command == "tracker" then
+    -- WorldMap.lua's tracker, from 0.5.0: the trip in hand, in a small panel.
+    if EW.TrackerCommand then EW.TrackerCommand() end
+  elseif command == "pins" then
+    -- WorldMap.lua's dots on the game's own world map, from 0.5.0.
+    if EW.PinsCommand then EW.PinsCommand() end
   elseif command == "clear" then
     Clear()
   elseif command == "snapshot" then
@@ -1302,7 +1308,7 @@ function EW.SlashCommand(message)
     if rest == "" and EW.ShowWindow and EW.ShowWindow("route") then return end
     if EW.Travel and EW.Travel.Command then EW.Travel.Command(rest) end
   else
-    EW.Print("Commands: /ewow (the window), /ewow status, /ewow deals, /ewow route <place>, /ewow minimap, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off, /ewow talents, /ewow talents clear.")
+    EW.Print("Commands: /ewow (the window), /ewow status, /ewow deals, /ewow route <place>, /ewow tracker, /ewow pins, /ewow minimap, /ewow clear, /ewow snapshot, /ewow path, /ewow probe, /ewow cap <name> on|off, /ewow talents, /ewow talents clear.")
   end
 end
 

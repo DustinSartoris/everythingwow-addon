@@ -2,6 +2,16 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.5.0** puts the planner on the game's own world map and adds a tracker. Until now a trip was planned in the Companion's window; now the map you open with the M key plans one too.
+
+- **Places on the world map.** The planner's places are dots on the world map, in the colors the window uses. Click one and the trip there is planned from where you stand; right-click one to start the trip there instead. A zone's map shows every place the planner has in it, a continent's map shows the capitals, the towns and the places boats and zeppelins leave from, and the places a planned trip passes through are always shown. `/ewow pins` takes the dots off the world map and puts them back.
+- **The way on the map.** A planned trip is drawn over the world map, a line for each step, with a gold ring where it ends. A trip that starts where you stand sets off from your own arrow, and the line keeps to you while the map is open.
+- **The tracker.** A small panel holds the trip in hand: where to, how long, and the next steps, the next one first. Drag it anywhere and it stays where you left it. Its Map button opens the window and its cross ends the trip. `/ewow tracker` hides it and shows it again.
+- **The trip follows you.** A trip that starts where you stand is planned again when you come into a new zone or a city, so the first step shown is always your next one. When you get where you were going the trip ends by itself, with a line in chat. Nothing is planned again in the air or on a boat.
+- **What it reads and saves.** The map that is shown, your character's place on it, and whether you are on a taxi. It registers no event of its own. Three small settings are saved: whether the dots are hidden, whether the tracker is, and where the tracker was left.
+- **WoW Forever alone.** Like the planner, all of this is there only where the planner's map is.
+- **The version and the tests.** Both tables of contents list `WorldMap.lua` and carry `## Version: 0.5.0`. The tests stand in for the world map and its canvas, read the dots of a zone, a continent and a map the client cannot place anything on, zoom it, click and right-click a dot, walk a trip from zone to zone to its end, and try the tracker on a client with no world map at all; the suite reads 3,250 assertions, from 3,039, under Lua 5.1 and 5.4.
+
 **0.4.3** mends the flight recorder, which had never written a flight in the game.
 
 - **Why no flight was written.** The recorder waited for the client to say that control of the character had come back, and asked there and then whether the character was still on the taxi. The real client still answers yes at that moment and stops a moment later, so the recorder took every landing for a stop on the way, kept the flight in the air for good, and wrote nothing. An upload of 26 November 2026 from 0.4.1 held 1,383 observations and not one flight.

@@ -2,9 +2,19 @@
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.4.3. It is free and open source under the MIT license.
+This is version 0.5.0. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.5.0** puts the planner on the game's own world map and adds a tracker. Until now a trip was planned in the Companion's window; now the map you open with the M key plans one too.
+
+- **Places on the world map.** The planner's places are dots on the world map, in the colors the window uses. Click one and the trip there is planned from where you stand; right-click one to start the trip there instead. A zone's map shows every place the planner has in it, a continent's map shows the capitals, the towns and the places boats and zeppelins leave from, and the places a planned trip passes through are always shown. `/ewow pins` takes the dots off the world map and puts them back.
+- **The way on the map.** A planned trip is drawn over the world map, a line for each step, with a gold ring where it ends. A trip that starts where you stand sets off from your own arrow, and the line keeps to you while the map is open.
+- **The tracker.** A small panel holds the trip in hand: where to, how long, and the next steps, the next one first. Drag it anywhere and it stays where you left it. Its Map button opens the window and its cross ends the trip. `/ewow tracker` hides it and shows it again.
+- **The trip follows you.** A trip that starts where you stand is planned again when you come into a new zone or a city, so the first step shown is always your next one. When you get where you were going the trip ends by itself, with a line in chat. Nothing is planned again in the air or on a boat.
+- **What it reads and saves.** The map that is shown, your character's place on it, and whether you are on a taxi. It registers no event of its own. Three small settings are saved: whether the dots are hidden, whether the tracker is, and where the tracker was left.
+- **WoW Forever alone.** Like the planner, all of this is there only where the planner's map is.
+- **The version and the tests.** Both tables of contents list `WorldMap.lua` and carry `## Version: 0.5.0`. The tests stand in for the world map and its canvas, read the dots of a zone, a continent and a map the client cannot place anything on, zoom it, click and right-click a dot, walk a trip from zone to zone to its end, and try the tracker on a client with no world map at all; the suite reads 3,250 assertions, from 3,039, under Lua 5.1 and 5.4.
 
 **0.4.3** mends the flight recorder, which had never written a flight in the game.
 
@@ -284,6 +294,8 @@ The map id and the coordinates are the client's own: `C_Map.GetBestMapForUnit("p
 |---|---|
 | `/ewow` | Opens the Companion's window: the Route page with its map, the Recorded page and a button for the Deals list. `/ewow show` and `/ewow window` do the same. Where the client cannot build the window, it prints the status instead. |
 | `/ewow minimap` | Hides the Companion's button on the minimap, or shows it again. |
+| `/ewow tracker` | On WoW Forever, hides the route tracker, the small panel that holds the trip in hand, or shows it again. |
+| `/ewow pins` | On WoW Forever, takes the planner's places off the game's world map, or puts them back. |
 | `/ewow status` | The client detected, the capability table, the recorders that cannot run on this client, the last forbidden action reported, the counts per kind, the number dropped, and the skipped, deduped, and ignored counts with the reason for each, plus the game version and the patch. |
 | `/ewow route <place>` | On WoW Forever, plans the trip to a place from where you stand, with the site's own planner: the steps and the time. `/ewow route` alone opens the window's Route page. `/ewow route <place> > <place>` plans between two places, and `/ewow route speed foot`, `travel`, `60` or `100` sets the speed routes are timed at. Records nothing. |
 | `/ewow clear` | Throws away everything recorded so far. Start here if you would rather not upload something. |
