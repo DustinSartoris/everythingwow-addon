@@ -17,7 +17,7 @@ subject, map, x, y, t, and payload.
 
 local ADDON_NAME, EW = ...
 
-EW.ADDON_VERSION = "0.5.0"
+EW.ADDON_VERSION = "0.5.1"
 EW.SCHEMA = 1
 
 -- The ring buffer holds this many observations and drops the oldest when it
@@ -1275,7 +1275,7 @@ function EW.SlashCommand(message)
     if EW.TrackerCommand then EW.TrackerCommand() end
   elseif command == "pins" then
     -- WorldMap.lua's dots on the game's own world map, from 0.5.0.
-    if EW.PinsCommand then EW.PinsCommand() end
+    if EW.PinsCommand then EW.PinsCommand(rest) end
   elseif command == "clear" then
     Clear()
   elseif command == "snapshot" then

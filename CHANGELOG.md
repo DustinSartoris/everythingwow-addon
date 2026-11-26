@@ -2,6 +2,13 @@
 
 Each entry names the version its tag carries. The same text stands under Changes in the README.
 
+**0.5.1** answers the first look at 0.5.0 in the game: the marks on the world map and the letter on the minimap button.
+
+- **Smaller, hollow marks on the world map.** The places were filled dots, too large, and each hid the map's own picture of the place under it. Each is now a hollow mark at three quarters of the size, so the map shows through, and its shape says what it is: a ring for a city, a town or a landmark, a diamond for a harbor or a zeppelin tower, a square for a dungeon, a raid or a battleground, in the colors of the window's key. A small mark keeps a button a little larger than itself, so it is still easy to click.
+- **You set the size.** The window has a World Map Dots button that goes round 50%, 75%, 100%, 125%, 150% and Off. `/ewow pins smaller` and `/ewow pins bigger` step through the same sizes, `/ewow pins 60` sets any size from 30 to 200, and `/ewow pins` alone still takes the marks off the map or puts them back. The size is one more small setting saved.
+- **The letter on the minimap button.** The W filled the button to its rim. It is now a little over half as wide as the button's face, as the pictures on the game's own round buttons are.
+- **The version and the tests.** Both tables of contents carry `## Version: 0.5.1`. The tests read each kind's shape, the size a new player gets, the smallest a mark is drawn, every way of setting the size and the window's button; the suite reads 3,310 assertions, from 3,250, under Lua 5.1 and 5.4.
+
 **0.5.0** puts the planner on the game's own world map and adds a tracker. Until now a trip was planned in the Companion's window; now the map you open with the M key plans one too.
 
 - **Places on the world map.** The planner's places are dots on the world map, in the colors the window uses. Click one and the trip there is planned from where you stand; right-click one to start the trip there instead. A zone's map shows every place the planner has in it, a continent's map shows the capitals, the towns and the places boats and zeppelins leave from, and the places a planned trip passes through are always shown. `/ewow pins` takes the dots off the world map and puts them back.

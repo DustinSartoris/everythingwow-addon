@@ -12,9 +12,14 @@ planner has in it. A continent's map shows the capitals, the towns and the
 places boats and zeppelins leave from. The map of the whole world shows the
 capitals. The places a planned trip passes through are always shown.
 
-The dots sit on the map's own canvas, so they move and zoom with the map,
+The marks sit on the map's own canvas, so they move and zoom with the map,
 and they are sized against the canvas's scale, so they stay the same size on
-the screen. /ewow pins takes them off the world map and puts them back.
+the screen. From 0.5.1 a mark is hollow, so the map's own picture of the
+place shows through it, and its shape says what the place is: a ring for a
+city, a town or a landmark, a diamond for a place boats and zeppelins leave
+from, and a square for a dungeon, a raid or a battleground. How large the
+marks are is the player's to say: the window's World Map Dots button goes
+round the sizes and Off, and /ewow pins does the same by hand.
 
 The tracker is a small panel that holds the trip in hand: where to, how
 long, and the next steps, the next one first. It can be dragged anywhere and
@@ -31,14 +36,19 @@ planned again in the air or on a boat.
 All of it is WoW Forever's, where the planner's map is. It reads the map
 that is shown, the character's place on it and whether the character is on
 a taxi, and registers no event of its own. Nothing here is saved but three
-small settings: whether the dots are hidden, whether the tracker is, and
-where the tracker was left.
+small settings: whether the dots are hidden and how large they are, whether
+the tracker is hidden, and where the tracker was left.
 ]]
 
 local ADDON_NAME, EW = ...
 
--- How much larger a dot is on the world map than in the window.
-EW.WORLD_MAP_GROW = 1.25
+-- How large a mark is on the world map, as a percent of its size in the
+-- window: the sizes the button goes round, and the one a new player gets.
+EW.WORLD_MAP_SIZES = { 50, 75, 100, 125, 150 }
+EW.WORLD_MAP_SIZE = 75
+-- No mark is drawn smaller than this, and none is harder to hit than this.
+EW.WORLD_MAP_SMALLEST = 7
+EW.WORLD_MAP_HIT = 14
 EW.TRACKER_ROWS = 5
 EW.TRACKER_WIDTH = 260
 EW.TRIP_FOLLOW_SECONDS = 2
@@ -140,19 +150,30 @@ local function TripPlaces(trip)
   return keys
 end
 
+-- The shape of a kind's mark: the picture in Media/ that draws it.
+local MARKS = {
+  capital_city = "mark-ring", town = "mark-ring", landmark = "mark-ring",
+  harbor = "mark-diamond", zeppelin_tower = "mark-diamond", sky_dock = "mark-diamond",
+  dungeon = "mark-square", raid = "mark-square", battleground = "mark-square",
+}
+
+--[[ How large the marks are, as a percent: what the player set, or the
+     size a new player gets. ]]
+function EW.WorldMapSize()
+  local size = Plain(EW.Database().worldMapSize)
+  if not size or size < 30 or size > 200 then return EW.WORLD_MAP_SIZE end
+  return size
+end
+
 local function PinAt(index)
   local pin = pins[index]
   if pin then return pin end
   pin = CreateFrame("Button", nil, layer)
-  local rim = pin:CreateTexture(nil, "BACKGROUND")
-  rim:SetPoint("TOPLEFT", pin, "TOPLEFT", -1, 1)
-  rim:SetPoint("BOTTOMRIGHT", pin, "BOTTOMRIGHT", 1, -1)
-  rim:SetTexture(MEDIA .. "dot")
-  rim:SetVertexColor(0, 0, 0, 0.9)
-  local dot = pin:CreateTexture(nil, "ARTWORK")
-  dot:SetAllPoints(pin)
-  dot:SetTexture(MEDIA .. "dot")
-  pin.dot = dot
+  -- One picture, in the middle of a button that is a little larger than it
+  -- so a small mark is still easy to hit.
+  local mark = pin:CreateTexture(nil, "ARTWORK")
+  mark:SetPoint("CENTER", pin, "CENTER", 0, 0)
+  pin.mark = mark
   pcall(function() pin:SetHighlightTexture(MEDIA .. "ring") end)
   EW.MapPickable(pin, nil, "", nil)
   pins[index] = pin
@@ -204,6 +225,7 @@ local function Draw()
 
   if not db.worldMapHidden and mapId and width and height and width > 0 and height > 0 then
     local grow = Grow(scale)
+    local percent = EW.WorldMapSize() / 100
     local styles = EW.PIN_STYLES
     local kinds = EW.WorldMapKinds(MapType(mapId))
     local onTrip = TripPlaces(trip)
@@ -216,12 +238,15 @@ local function Draw()
         usedPins = usedPins + 1
         local pin = PinAt(usedPins)
         local style = styles[place.kind] or styles.landmark
-        local size = style.size * EW.WORLD_MAP_GROW * grow
-        pin:SetSize(size, size)
+        local drawn = math.max(EW.WORLD_MAP_SMALLEST, style.size * percent)
+        local hit = math.max(EW.WORLD_MAP_HIT, drawn + 4)
+        pin:SetSize(hit * grow, hit * grow)
         pin:ClearAllPoints()
         pin:SetPoint("CENTER", layer, "TOPLEFT", spot.x * width, -spot.y * height)
         pcall(function() pin:SetFrameLevel(baseLevel + style.level) end)
-        pin.dot:SetVertexColor(style.color[1], style.color[2], style.color[3], 1)
+        pin.mark:SetTexture(MEDIA .. (MARKS[place.kind] or "mark-ring"))
+        pin.mark:SetSize(drawn * grow, drawn * grow)
+        pin.mark:SetVertexColor(style.color[1], style.color[2], style.color[3], 1)
         local zone = place.zone and T.ZONES[place.zone]
         local what = zone and (style.label .. ", " .. zone.name) or style.label
         if spot.estimated then what = what .. " (its spot is an estimate)" end
@@ -253,7 +278,7 @@ local function Draw()
           end
           usedLines = usedLines + 1
           local color = EW.STEP_COLORS[step.family] or EW.STEP_COLOR
-          line:SetThickness(3 * grow)
+          line:SetThickness(math.max(2, 3 * percent) * grow)
           line:SetColorTexture(color[1], color[2], color[3], 0.95)
           line:SetStartPoint("TOPLEFT", layer, ax * width, -ay * height)
           line:SetEndPoint("TOPLEFT", layer, bx * width, -by * height)
@@ -267,8 +292,8 @@ local function Draw()
     -- Where the character stands the client's own arrow already shows, so
     -- only a start that was picked gets a ring.
     local from = trip and not trip.here and trip.from or nil
-    PlaceRing(layer.goal, to, mapId, width, height, 26 * grow)
-    PlaceRing(layer.start, from, mapId, width, height, 22 * grow)
+    PlaceRing(layer.goal, to, mapId, width, height, math.max(18, 26 * percent) * grow)
+    PlaceRing(layer.start, from, mapId, width, height, math.max(16, 22 * percent) * grow)
   else
     PlaceRing(layer.goal, nil)
     PlaceRing(layer.start, nil)
@@ -371,20 +396,93 @@ function EW.RefreshWorldMap()
   return (pcall(Draw))
 end
 
---[[ /ewow pins: takes the places off the world map, or puts them back. ]]
-function EW.PinsCommand()
+--[[ What the window's button says: how large the marks are, or that they
+     are off. ]]
+function EW.WorldMapDotsLabel()
+  if EW.Database().worldMapHidden then return "World Map Dots: Off" end
+  return string.format("World Map Dots: %d%%", EW.WorldMapSize())
+end
+
+--[[ Sets how large the marks are, as a percent, and shows them. ]]
+function EW.SetWorldMapSize(percent)
+  percent = Plain(percent)
+  if not percent then return false end
+  local db = EW.Database()
+  db.worldMapSize = math.max(30, math.min(200, math.floor(percent + 0.5)))
+  db.worldMapHidden = nil
+  EW.RefreshWorldMap()
+  return true
+end
+
+--[[ The next of the sizes after the one set, or the one before it: the
+     smallest and the largest are where it stops. ]]
+local function Step(up)
+  local sizes, now = EW.WORLD_MAP_SIZES, EW.WorldMapSize()
+  local chosen
+  if up then
+    for index = #sizes, 1, -1 do
+      if sizes[index] > now then chosen = sizes[index] end
+    end
+  else
+    for index = 1, #sizes do
+      if sizes[index] < now then chosen = sizes[index] end
+    end
+  end
+  return chosen or now
+end
+
+--[[ The window's button: round the sizes, smallest first, then off, then
+     the smallest again. ]]
+function EW.NextWorldMapSize()
+  local db = EW.Database()
+  local sizes = EW.WORLD_MAP_SIZES
+  if db.worldMapHidden then
+    EW.SetWorldMapSize(sizes[1])
+  elseif EW.WorldMapSize() >= sizes[#sizes] then
+    db.worldMapHidden = true
+    EW.RefreshWorldMap()
+  else
+    EW.SetWorldMapSize(Step(true))
+  end
+  return EW.WorldMapDotsLabel()
+end
+
+--[[ /ewow pins: takes the places off the world map, or puts them back.
+     /ewow pins smaller, /ewow pins bigger and /ewow pins 60 set how large
+     they are. ]]
+function EW.PinsCommand(rest)
   if not Forever() then
     EW.Print("The places on the world map cover WoW Forever only.")
     return
   end
   local db = EW.Database()
-  db.worldMapHidden = not db.worldMapHidden and true or nil
-  EW.RefreshWorldMap()
-  if db.worldMapHidden then
-    EW.Print("The places are off the world map. /ewow pins puts them back.")
+  local word = string.lower(tostring(rest or "")):gsub("^%s+", ""):gsub("%s+$", "")
+  word = word:gsub("^size%s*", ""):gsub("%%$", "")
+  if word == "off" or word == "on" then
+    db.worldMapHidden = word == "off" and true or nil
+    EW.RefreshWorldMap()
+    EW.Print(word == "off" and "The places are off the world map. /ewow pins puts them back."
+      or "The places are on the world map. Click one to plan a route there.")
+  elseif word ~= "" then
+    local percent = tonumber(word)
+    if word == "smaller" or word == "small" then percent = Step(false) end
+    if word == "bigger" or word == "larger" or word == "big" then percent = Step(true) end
+    if not percent or percent < 30 or percent > 200 then
+      EW.Print("Usage: /ewow pins hides or shows the places on the world map. /ewow pins smaller, /ewow pins bigger, or /ewow pins 30 to 200 sets their size in percent.")
+      return
+    end
+    EW.SetWorldMapSize(percent)
+    EW.Print(string.format("The places on the world map are drawn at %d%%.", EW.WorldMapSize()))
   else
-    EW.Print("The places are on the world map. Click one to plan a route there.")
+    db.worldMapHidden = not db.worldMapHidden and true or nil
+    EW.RefreshWorldMap()
+    if db.worldMapHidden then
+      EW.Print("The places are off the world map. /ewow pins puts them back.")
+    else
+      EW.Print("The places are on the world map. Click one to plan a route there.")
+    end
   end
+  if EW.RefreshDotsButton then pcall(EW.RefreshDotsButton) end
 end
 
 --------------------------------------------------------------------------

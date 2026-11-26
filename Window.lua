@@ -425,8 +425,14 @@ local function RefreshRecorded()
   frame.travel:SetText(table.concat(reports, "\n"))
 end
 
+--[[ The World Map Dots button says the size set, or Off. ]]
+function EW.RefreshDotsButton()
+  if window and window.dots and EW.WorldMapDotsLabel then window.dots:SetText(EW.WorldMapDotsLabel()) end
+end
+
 local function Refresh()
   if not window then return end
+  pcall(EW.RefreshDotsButton)
   ShowAll(window.routeWidgets, page == "route")
   ShowAll(window.recordedWidgets, page == "recorded")
   if page == "route" then
@@ -892,6 +898,24 @@ local function BuildWindow()
   recordedTab:SetPoint("LEFT", routeTab, "RIGHT", 6, 0)
   local dealsTab = Button("Deals", 90, function() if EW.ToggleDeals then EW.ToggleDeals() end end)
   dealsTab:SetPoint("LEFT", recordedTab, "RIGHT", 6, 0)
+  -- How large the places are drawn on the game's own world map, from 0.5.1:
+  -- a click goes round the sizes and Off.
+  if forever and EW.NextWorldMapSize then
+    frame.dots = Button("World Map Dots", 170, function()
+      EW.NextWorldMapSize()
+      EW.RefreshDotsButton()
+    end)
+    frame.dots:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -14, -30)
+    frame.dots:SetScript("OnEnter", function(self)
+      pcall(function()
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("Places on the world map")
+        GameTooltip:AddLine("Click to change how large the places are drawn on the game's own map, or to turn them off.", 1, 1, 1, true)
+        GameTooltip:Show()
+      end)
+    end)
+    frame.dots:SetScript("OnLeave", function() pcall(function() GameTooltip:Hide() end) end)
+  end
 
   local routeWidgets, recordedWidgets = {}, {}
   local function Route(widget) routeWidgets[#routeWidgets + 1] = widget return widget end

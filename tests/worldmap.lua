@@ -309,13 +309,22 @@ return function(t)
   local razorX, razorY = P.Spot("razor-hill", zoneMap.durotar)
   check("where the client says Razor Hill is, on the canvas",
     razor.point[1] == "CENTER" and razor.point[2] == layer and near(razor.point[4], razorX * 1002) and near(razor.point[5], -razorY * 668))
-  check("a little larger than in the window", near(razor.size[1], styles.town.size * mapped.WORLD_MAP_GROW))
+  equal("a new player's marks are drawn at three quarters of the window's size", mapped.WorldMapSize(), 75)
+  check("so a town's is", near(razor.mark.size[1], styles.town.size * 0.75) and near(razor.mark.size[2], styles.town.size * 0.75))
+  check("in a button a little larger, so a small mark is easy to hit", near(razor.size[1], mapped.WORLD_MAP_HIT))
+  equal("a town's mark is a hollow ring", razor.mark.texture, mapped.MEDIA .. "mark-ring")
+  check("in the town's color", razor.mark.color[1] == styles.town.color[1] and razor.mark.color[3] == styles.town.color[3])
+  equal("set in the middle of its button", razor.mark.point[1], "CENTER")
   equal("its tooltip names it", razor.tipName, "Razor Hill")
   equal("and says what it is", razor.tipKind, "Town, Durotar")
   equal("above the sheet by its kind", razor.level, 321 + 1 + styles.town.level)
   worldMap.mapId = zoneMap.barrens
   worldMap:OnMapChanged()
   check("a dungeon is shown on its zone's map", PinOf("wailing-caverns") ~= nil)
+  equal("as a hollow square", PinOf("wailing-caverns").mark.texture, mapped.MEDIA .. "mark-square")
+  equal("a harbor as a hollow diamond", PinOf("ratchet").mark.texture, mapped.MEDIA .. "mark-diamond")
+  check("a landmark's mark is no smaller than the smallest",
+    near(math.max(mapped.WORLD_MAP_SMALLEST, styles.landmark.size * 0.75), mapped.WORLD_MAP_SMALLEST))
   equal("the dots of the zone before are not", PinOf("razor-hill"), nil)
 
   -- A continent's map shows the larger places.
@@ -348,10 +357,62 @@ return function(t)
   worldMap:OnMapChanged()
   canvas.scale = 0.5
   worldMap:OnCanvasScaleChanged()
-  check("at half the scale a dot is drawn twice as large", near(PinOf("orgrimmar").size[1], styles.capital_city.size * mapped.WORLD_MAP_GROW * 2))
+  check("at half the scale a mark is drawn twice as large", near(PinOf("orgrimmar").mark.size[1], styles.capital_city.size * 0.75 * 2))
+  check("and its button", near(PinOf("orgrimmar").size[1], (styles.capital_city.size * 0.75 + 4) * 2))
   canvas.scale = 1
   worldMap:OnCanvasScaleChanged()
-  check("and back", near(PinOf("orgrimmar").size[1], styles.capital_city.size * mapped.WORLD_MAP_GROW))
+  check("and back", near(PinOf("orgrimmar").mark.size[1], styles.capital_city.size * 0.75))
+  equal("a capital's mark is a ring too, the largest", PinOf("orgrimmar").mark.texture, mapped.MEDIA .. "mark-ring")
+
+  -- How large the marks are is the player's to say.
+  stub.state.printed = {}
+  mapped.SlashCommand("pins bigger")
+  equal("/ewow pins bigger takes the next size up", mapped.WorldMapSize(), 100)
+  check("and the marks are drawn at it", near(PinOf("orgrimmar").mark.size[1], styles.capital_city.size))
+  check("and says so", stub.state.printed[#stub.state.printed]:find("drawn at 100%%") ~= nil, stub.state.printed[#stub.state.printed])
+  mapped.SlashCommand("pins smaller")
+  mapped.SlashCommand("pins smaller")
+  equal("/ewow pins smaller twice takes it two down", mapped.WorldMapSize(), 50)
+  check("a mark is never drawn smaller than the smallest", near(PinOf("ratchet").mark.size[1], mapped.WORLD_MAP_SMALLEST))
+  mapped.SlashCommand("pins smaller")
+  equal("and stops at the smallest size", mapped.WorldMapSize(), 50)
+  mapped.SlashCommand("pins 60")
+  equal("/ewow pins 60 sets it by hand", mapped.Database().worldMapSize, 60)
+  mapped.SlashCommand("pins size 140%")
+  equal("as does /ewow pins size 140%", mapped.WorldMapSize(), 140)
+  mapped.SlashCommand("pins bigger")
+  equal("bigger from between two sizes is the next one up", mapped.WorldMapSize(), 150)
+  mapped.SlashCommand("pins bigger")
+  equal("and stops at the largest", mapped.WorldMapSize(), 150)
+  stub.state.printed = {}
+  mapped.SlashCommand("pins 500")
+  equal("a size out of range changes nothing", mapped.WorldMapSize(), 150)
+  check("and prints how to use it", stub.state.printed[1]:find("Usage: /ewow pins", 1, true) ~= nil)
+  mapped.SlashCommand("pins sideways")
+  equal("nor does a word it does not know", #stub.state.printed, 2)
+  mapped.SlashCommand("pins off")
+  equal("/ewow pins off takes them off", Shown(), 0)
+  mapped.SlashCommand("pins on")
+  equal("and /ewow pins on puts them back", Shown(), continentCount)
+  mapped.Database().worldMapSize = "large"
+  equal("a size that is no number is passed over for the usual one", mapped.WorldMapSize(), 75)
+  mapped.Database().worldMapSize = 900
+  equal("as is a saved size far too large", mapped.WorldMapSize(), 75)
+  mapped.Database().worldMapSize = 5
+  equal("or far too small", mapped.WorldMapSize(), 75)
+  mapped.Database().worldMapSize = nil
+
+  -- The window's button goes round the sizes and Off.
+  equal("the button's words say the size", mapped.WorldMapDotsLabel(), "World Map Dots: 75%")
+  equal("a click takes the next size", mapped.NextWorldMapSize(), "World Map Dots: 100%")
+  mapped.NextWorldMapSize()
+  equal("and the next", mapped.NextWorldMapSize(), "World Map Dots: 150%")
+  equal("after the largest comes Off", mapped.NextWorldMapSize(), "World Map Dots: Off")
+  equal("with no mark on the map", Shown(), 0)
+  equal("and after Off the smallest", mapped.NextWorldMapSize(), "World Map Dots: 50%")
+  equal("with the marks back", Shown(), continentCount)
+  mapped.NextWorldMapSize()
+  equal("back at the size a new player gets", mapped.WorldMapSize(), 75)
 
   -- Opening the map draws it for the map it opens on.
   worldMap.mapId = zoneMap.durotar
@@ -376,7 +437,8 @@ return function(t)
   local firstLine = layer.route[1]
   check("the first line sets off from the character",
     near(firstLine.startPoint[3], 0.61 * 1002) and near(firstLine.startPoint[4], -0.44 * 668))
-  equal("drawn at three wide", firstLine.thickness, 3)
+  check("drawn a little thinner at three quarters", near(firstLine.thickness, 2.25))
+  check("the gold ring a little smaller too", near(layer.goal.size[1], 26 * 0.75))
   check("the tracker shows the trip too", mapped.tracker ~= nil and mapped.tracker:IsShown() and mapped.tracker.title.text == "Orgrimmar to Ratchet (On foot)")
   equal("the window was never opened for it", mapped.window, nil)
 
@@ -430,6 +492,22 @@ return function(t)
   equal("/ewow pins again puts them back", Shown(), continentCount + 1)
   check("with the way", layer.routeShown >= 1)
 
+  -- The button in the window.
+  mapped.SlashCommand("")
+  local dots = mapped.window.dots
+  check("the window has a World Map Dots button", dots ~= nil)
+  equal("which says the size", dots.text, "World Map Dots: 75%")
+  dots.scripts.OnClick(dots)
+  equal("a click takes the next size and says it", dots.text, "World Map Dots: 100%")
+  check("and the marks on the map follow", near(PinOf("orgrimmar").mark.size[1], styles.capital_city.size))
+  mapped.SlashCommand("pins 75")
+  equal("the command and the button agree", dots.text, "World Map Dots: 75%")
+  mapped.SlashCommand("pins")
+  equal("off by the command reads Off on the button", dots.text, "World Map Dots: Off")
+  mapped.SlashCommand("pins")
+  equal("and on again reads the size", dots.text, "World Map Dots: 75%")
+  mapped.window:Hide()
+
   -- Ending the trip.
   mapped.WindowClear()
   equal("ending the trip takes the way off the map", layer.routeShown, 0)
@@ -476,6 +554,9 @@ return function(t)
 
   -- Another client: nothing of it.
   local retail = t.LoadFreshAddon(1, { "12.1.0", "60000", "Sep 17 2026", 120100 })
+  retail.SlashCommand("")
+  equal("off WoW Forever the window has no World Map Dots button", retail.window.dots, nil)
+  retail.window:Hide()
   equal("off WoW Forever no sheet is laid on the world map", retail.worldMapLayer, nil)
   equal("asking for it says no", retail.WorldMapStart(), false)
   equal("no trip is followed", retail.TRIP_FOLLOWING, false)

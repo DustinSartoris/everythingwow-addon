@@ -2,9 +2,16 @@
 
 The Everything WoW Companion records what Blizzard's API does not publish: where an NPC stands, where a quest starts, what a vendor sells, what a kill dropped, and what your own character is wearing. An addon cannot send anything over the network, so the Companion writes what it sees to its saved variables file and you upload that file when you feel like it. Nothing leaves your computer until you choose to upload it.
 
-This is version 0.5.0. It is free and open source under the MIT license.
+This is version 0.5.1. It is free and open source under the MIT license.
 
 ## Changes
+
+**0.5.1** answers the first look at 0.5.0 in the game: the marks on the world map and the letter on the minimap button.
+
+- **Smaller, hollow marks on the world map.** The places were filled dots, too large, and each hid the map's own picture of the place under it. Each is now a hollow mark at three quarters of the size, so the map shows through, and its shape says what it is: a ring for a city, a town or a landmark, a diamond for a harbor or a zeppelin tower, a square for a dungeon, a raid or a battleground, in the colors of the window's key. A small mark keeps a button a little larger than itself, so it is still easy to click.
+- **You set the size.** The window has a World Map Dots button that goes round 50%, 75%, 100%, 125%, 150% and Off. `/ewow pins smaller` and `/ewow pins bigger` step through the same sizes, `/ewow pins 60` sets any size from 30 to 200, and `/ewow pins` alone still takes the marks off the map or puts them back. The size is one more small setting saved.
+- **The letter on the minimap button.** The W filled the button to its rim. It is now a little over half as wide as the button's face, as the pictures on the game's own round buttons are.
+- **The version and the tests.** Both tables of contents carry `## Version: 0.5.1`. The tests read each kind's shape, the size a new player gets, the smallest a mark is drawn, every way of setting the size and the window's button; the suite reads 3,310 assertions, from 3,250, under Lua 5.1 and 5.4.
 
 **0.5.0** puts the planner on the game's own world map and adds a tracker. Until now a trip was planned in the Companion's window; now the map you open with the M key plans one too.
 
@@ -295,7 +302,7 @@ The map id and the coordinates are the client's own: `C_Map.GetBestMapForUnit("p
 | `/ewow` | Opens the Companion's window: the Route page with its map, the Recorded page and a button for the Deals list. `/ewow show` and `/ewow window` do the same. Where the client cannot build the window, it prints the status instead. |
 | `/ewow minimap` | Hides the Companion's button on the minimap, or shows it again. |
 | `/ewow tracker` | On WoW Forever, hides the route tracker, the small panel that holds the trip in hand, or shows it again. |
-| `/ewow pins` | On WoW Forever, takes the planner's places off the game's world map, or puts them back. |
+| `/ewow pins` | On WoW Forever, takes the planner's places off the game's world map, or puts them back. `/ewow pins smaller` and `/ewow pins bigger` change how large they are drawn, and `/ewow pins 60` sets a size from 30 to 200 percent. |
 | `/ewow status` | The client detected, the capability table, the recorders that cannot run on this client, the last forbidden action reported, the counts per kind, the number dropped, and the skipped, deduped, and ignored counts with the reason for each, plus the game version and the patch. |
 | `/ewow route <place>` | On WoW Forever, plans the trip to a place from where you stand, with the site's own planner: the steps and the time. `/ewow route` alone opens the window's Route page. `/ewow route <place> > <place>` plans between two places, and `/ewow route speed foot`, `travel`, `60` or `100` sets the speed routes are timed at. Records nothing. |
 | `/ewow clear` | Throws away everything recorded so far. Start here if you would rather not upload something. |

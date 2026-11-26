@@ -482,7 +482,7 @@ return function(t)
   stub.state.map = nil
 
   -- The pictures the addon ships, as the game reads them.
-  for _, picture in ipairs({ { "icon", 64 }, { "minimap", 64 }, { "dot", 16 }, { "ring", 32 } }) do
+  for _, picture in ipairs({ { "icon", 64 }, { "minimap", 64 }, { "dot", 16 }, { "ring", 32 }, { "mark-ring", 32 }, { "mark-diamond", 32 }, { "mark-square", 32 } }) do
     local handle = io.open(t.root .. "Media/" .. picture[1] .. ".tga", "rb")
     check("Media/" .. picture[1] .. ".tga is shipped", handle ~= nil)
     if handle then
