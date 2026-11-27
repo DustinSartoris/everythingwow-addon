@@ -27,7 +27,8 @@ return function(t)
           -- With a stand in for the minimap's files, a file that is not
           -- there is refused, as the client refuses it.
           local files = rawget(_G, "EW_TEST_TILES")
-          if files and type(texture) == "string" and texture:lower():find("minimaps", 1, true) and not files(texture) then
+          local asksForGround = type(texture) == "number" or (type(texture) == "string" and texture:lower():find("minimaps", 1, true))
+          if files and asksForGround and not files(texture) then
             self.texture = nil
             return false
           end
@@ -512,7 +513,7 @@ return function(t)
   -- On a client that does not give the ground's pictures, the map still zooms.
   equal("this client gave no picture of the ground", real.terrain.ok, false)
   check("and the status line says which was asked for",
-    real.TerrainReport():find("terrain map: off, the client gave no picture for world/minimaps/", 1, true) ~= nil, real.TerrainReport())
+    real.TerrainReport():find("^terrain map: off, the client gave no picture for %d+$") ~= nil, real.TerrainReport())
   equal("so the map zooms no further than its own picture is worth", realMap.zoomMax, real.MAP_ZOOM_MAX_DRAWN)
   realMap.zoomTo(100)
   equal("the zoom stops there", realMap.zoom, real.MAP_ZOOM_MAX_DRAWN)
@@ -522,22 +523,31 @@ return function(t)
 
   -- A client that gives the minimap's pictures of the ground.
   local asked = {}
+  -- As WoW Forever does: a square asked for by its name is refused, and one
+  -- asked for by the client's own number for it is given. One number is
+  -- refused too, to stand for a square the client has no picture of.
+  local numbers = real.TERRAIN_IDS[1]
+  local missing = numbers[22 * 64 + 22]
   rawset(_G, "EW_TEST_TILES", function(name)
     asked[#asked + 1] = name
-    if name:find("^world/minimaps/kalimdor/map%d%d_%d%d%.blp$") == nil then return false end
-    return name ~= "world/minimaps/kalimdor/map22_22.blp"
+    return type(name) == "number" and name ~= missing
   end)
   local savedPointer = rawget(_G, "GetCursorPosition")
   local pointerX, pointerY = nil, nil
   rawset(_G, "GetCursorPosition", function() return pointerX, pointerY and -pointerY end)
   local grounded = t.LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  equal("the ground is drawn once a square is 48 pixels wide", grounded.TERRAIN_TILE_PIXELS, 48)
+  equal("and never more than 220 squares of it", grounded.TERRAIN_TILES_MAX, 220)
+  -- The stand in world's squares are larger on its map than the game's, so
+  -- the tests hold the two numbers where the cases below were worked out.
+  grounded.TERRAIN_TILE_PIXELS, grounded.TERRAIN_TILES_MAX = 64, 160
   stub.state.map = 1454
   grounded.SlashCommand("")
   local gmap = grounded.window.map
   check("the window's map is the real one", gmap ~= nil and gmap.real == true, tostring(grounded.realMapError))
   equal("the client was asked for the square a capital stands on, and gave it", grounded.terrain.ok, true)
-  check("by its name in the minimap's folder", grounded.terrain.name:find("^world/minimaps/kalimdor/map%d%d_%d%d%.blp$") ~= nil, grounded.terrain.name)
-  check("and the status line says so", grounded.TerrainReport():find("terrain map: on (world/minimaps/kalimdor/", 1, true) ~= nil)
+  check("by the client's own number for it", type(grounded.terrain.name) == "number" and grounded.terrain.name > 200000, grounded.terrain.name)
+  check("and the status line says so", grounded.TerrainReport():find("^terrain map: on %(%d+%)$") ~= nil, grounded.TerrainReport())
   equal("so the map zooms all the way in", gmap.zoomMax, grounded.MAP_ZOOM_MAX)
   equal("it opens on the whole continent", gmap.zoom, 1)
   equal("where a square of the ground is too small to draw", gmap.terrainShown, 0)
@@ -596,7 +606,7 @@ return function(t)
     local column, row = picture.square[1], picture.square[2]
     if key ~= column * 64 + row or column < columnA or column > columnB or row < rowA or row > rowB then inRange = false end
     local bx0, by0, bx1, by1 = GP.TileBox(world.KALIMDOR, column, row)
-    if picture.texture ~= string.format("world/minimaps/kalimdor/map%02d_%02d.blp", column, row)
+    if picture.texture ~= numbers[column * 64 + row] or picture.texture == nil
       or not near(picture.point[4], bx0 * mapWide * gmap.zoom + gmap.offsetX)
       or not near(picture.point[5], -(by0 * mapHigh * gmap.zoom + gmap.offsetY))
       or not near(picture.size[1], (bx1 - bx0) * mapWide * gmap.zoom) or picture:IsShown() ~= true then
@@ -604,8 +614,18 @@ return function(t)
     end
   end
   check("each is a square in view", inRange)
-  check("each the client's own file, laid where the client says the square is", placed)
+  check("each the client's own file, asked for by its number and laid where the client says the square is", placed)
   equal("a square is a third of 1,600 yards a side", GP.TILE_YARDS, 1600 / 3)
+
+  -- The numbers the squares are asked for by.
+  equal("the square Orgrimmar stands on is the file the owner saw in the game", grounded.TERRAIN_IDS[1][40 * 64 + 29], 208333)
+  equal("Kalimdor has 1,105 squares with a number", grounded.TERRAIN_ID_COUNTS[1], 1105)
+  equal("the Eastern Kingdoms 1,224", grounded.TERRAIN_ID_COUNTS[0], 1224)
+  local names = GP.TileNames(1, 40, 29)
+  equal("a square is asked for by its number first", names[1], 208333)
+  equal("and by its name after that, for a client that takes names", names[2], "world/minimaps/kalimdor/map40_29.blp")
+  equal("a square with no number is asked for by name alone", GP.TileNames(1, 63, 63)[1], "world/minimaps/kalimdor/map63_63.blp")
+  equal("a continent the planner does not have has no squares", #GP.TileNames(530, 30, 30), 0)
   local bx0, _, bx1 = GP.TileBox(world.KALIMDOR, 30, 30)
   check("which the stand in world makes a known part of the continent", near(bx1 - bx0, GP.TILE_YARDS / 10000))
 
@@ -618,7 +638,7 @@ return function(t)
   gmap.moveTo(gmap.offsetX + 1, gmap.offsetY)
   local again = 0
   for index = asksBefore + 1, #asked do
-    if asked[index]:find("map22_22", 1, true) then again = again + 1 end
+    if asked[index] == missing or tostring(asked[index]):find("map22_22", 1, true) then again = again + 1 end
   end
   equal("and the client is not asked for it again at every move", again, 0)
 
@@ -704,7 +724,13 @@ return function(t)
   equal("the plus button zooms in a step", gmap.zoom, 1.5)
   click(gmap.zoomOut)
   equal("and the minus button out", gmap.zoom, 1)
-  gmap.zoomTo(1000, orgX * mapWide, orgY * mapHigh)
+  local landColumn, landRow
+  for column = 14, 30 do
+    for row = 14, 30 do
+      if not landColumn and numbers[column * 64 + row] and numbers[column * 64 + row] ~= missing then landColumn, landRow = column, row end
+    end
+  end
+  gmap.zoomTo(1000, (32 - landRow - 0.5) * GP.TILE_YARDS / 10000 * mapWide, (32 - landColumn - 0.5) * GP.TILE_YARDS / 10000 * mapHigh)
   equal("the zoom stops at its largest", gmap.zoom, grounded.MAP_ZOOM_MAX)
   check("where only a square or two of the ground is in view", gmap.terrainShown >= 1 and gmap.terrainShown <= 6, gmap.terrainShown)
   click(gmap.tabs[2])
@@ -747,6 +773,7 @@ return function(t)
     check(toc .. " names the site's mark as the addon's icon",
       text:find("## IconTexture: Interface\\AddOns\\EverythingWoW\\Media\\icon", 1, true) ~= nil)
     check(toc .. " loads the maps and the places before the window", text:find("TravelMap.lua\nTravelCoords.lua\nPlaces.lua\nWindow.lua", 1, true) ~= nil)
+    check(toc .. " loads the squares' numbers before them", text:find("Travel.lua\nTerrainIds.lua\nTravelMap.lua", 1, true) ~= nil)
   end
 
   -- A client that cannot build the window keeps the commands.

@@ -44,7 +44,7 @@ end
 
 stub.Install(_G)
 
-local FILES = { "Core", "Known", "Items", "Units", "Objects", "Quests", "Vendor", "Loot", "Flights", "Rides", "Snapshot", "Talents", "Auction", "Deals", "TravelData", "Travel", "TravelMap", "TravelCoords", "Places", "Window", "WorldMap" }
+local FILES = { "Core", "Known", "Items", "Units", "Objects", "Quests", "Vendor", "Loot", "Flights", "Rides", "Snapshot", "Talents", "Auction", "Deals", "TravelData", "Travel", "TerrainIds", "TravelMap", "TravelCoords", "Places", "Window", "WorldMap" }
 
 --[[ Loads every addon file fresh into a new table, the way the game loads
      them once at login: EW.Client and EW.Caps are computed as Core.lua

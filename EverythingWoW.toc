@@ -27,6 +27,7 @@ Auction.lua
 Deals.lua
 TravelData.lua
 Travel.lua
+TerrainIds.lua
 TravelMap.lua
 TravelCoords.lua
 Places.lua

@@ -102,8 +102,8 @@ local picks = { from = nil, to = nil, stage = 0 }
 EW.MAP_ZOOM_STEP = 1.5
 EW.MAP_ZOOM_MAX = 48
 EW.MAP_ZOOM_MAX_DRAWN = 6
-EW.TERRAIN_TILE_PIXELS = 64
-EW.TERRAIN_TILES_MAX = 160
+EW.TERRAIN_TILE_PIXELS = 48
+EW.TERRAIN_TILES_MAX = 220
 
 --------------------------------------------------------------------------
 -- What the pages show, as plain values, so the tests can read them
