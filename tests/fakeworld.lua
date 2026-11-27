@@ -90,6 +90,19 @@ return function(EW)
     if not rect or continentId[rect.continent] ~= continent then return nil end
     return mapId, Vector((x - rect[1]) / (rect[3] - rect[1]), (y - rect[2]) / (rect[4] - rect[2]))
   end
+  -- The zone at a spot of a continent: the smallest rectangle the spot is in.
+  function calls.GetMapInfoAtPosition(mapId, x, y)
+    if not continentId[mapId] then return nil end
+    local found, foundArea
+    for zoneMapId, rect in pairs(world.rect) do
+      if rect.continent == mapId and x >= rect[1] and x <= rect[3] and y >= rect[2] and y <= rect[4] then
+        local area = (rect[3] - rect[1]) * (rect[4] - rect[2])
+        if not foundArea or area < foundArea then found, foundArea = zoneMapId, area end
+      end
+    end
+    if not found then return nil end
+    return { mapID = found, mapType = 3, parentMapID = mapId, name = T.ZONES[T.ZONE_MAPS[found]].name }
+  end
   function calls.GetMapArtLayers(mapId)
     if not continentId[mapId] then return nil end
     return { { layerWidth = 1002, layerHeight = 668, tileWidth = 256, tileHeight = 256 } }

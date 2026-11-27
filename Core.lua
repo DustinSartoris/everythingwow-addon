@@ -1194,6 +1194,8 @@ local function Status()
   -- How far the two travel recorders have got this session, from 0.4.3.
   if EW.FlightReport then EW.Print(EW.FlightReport()) end
   if EW.RideReport then EW.Print(EW.RideReport()) end
+  -- Whether the window's map can show the ground itself, from 0.5.1.
+  if EW.TerrainReport and EW.VersionKey() == "forever" then EW.Print(EW.TerrainReport()) end
   EW.Print("Upload the file at https://everythingwow.com/addons/companion/upload")
 end
 

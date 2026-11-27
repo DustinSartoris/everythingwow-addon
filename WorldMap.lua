@@ -1,11 +1,14 @@
 --[[
-The planner on the game's own world map, and the tracker.
+The planner on the game's own world map, for the player who asks for it,
+and the tracker.
 
-The window of Window.lua is one place to plan a trip. The map players
-already open, with the M key, is the other. From 0.5.0 the planner's places
-are dots on that map too: a click on a dot plans the trip there from where
-the character stands, a right-click starts the trip there instead, and the
-way is drawn over the map in the same colors the window uses.
+The window of Window.lua is where a trip is planned. The map players
+already open, with the M key, is left as the game draws it unless the
+player turns the planner's places on there: /ewow pins, or the window's
+World Map Dots button. Then the places are marks on that map too: a click
+on a mark is where the trip starts, the next click is where it ends, a
+right-click goes there from where the character stands, and the way is
+drawn over the map in the same colors the window uses.
 
 Which places are shown goes by the map. A zone's map shows every place the
 planner has in it. A continent's map shows the capitals, the towns and the
@@ -36,7 +39,7 @@ planned again in the air or on a boat.
 All of it is WoW Forever's, where the planner's map is. It reads the map
 that is shown, the character's place on it and whether the character is on
 a taxi, and registers no event of its own. Nothing here is saved but three
-small settings: whether the dots are hidden and how large they are, whether
+small settings: whether the dots are on and how large they are, whether
 the tracker is hidden, and where the tracker was left.
 ]]
 
@@ -223,7 +226,7 @@ local function Draw()
   local trip = EW.trip
   layer.follow = nil
 
-  if not db.worldMapHidden and mapId and width and height and width > 0 and height > 0 then
+  if db.worldMapOn and mapId and width and height and width > 0 and height > 0 then
     local grow = Grow(scale)
     local percent = EW.WorldMapSize() / 100
     local styles = EW.PIN_STYLES
@@ -399,7 +402,7 @@ end
 --[[ What the window's button says: how large the marks are, or that they
      are off. ]]
 function EW.WorldMapDotsLabel()
-  if EW.Database().worldMapHidden then return "World Map Dots: Off" end
+  if not EW.Database().worldMapOn then return "World Map Dots: Off" end
   return string.format("World Map Dots: %d%%", EW.WorldMapSize())
 end
 
@@ -409,7 +412,7 @@ function EW.SetWorldMapSize(percent)
   if not percent then return false end
   local db = EW.Database()
   db.worldMapSize = math.max(30, math.min(200, math.floor(percent + 0.5)))
-  db.worldMapHidden = nil
+  db.worldMapOn = true
   EW.RefreshWorldMap()
   return true
 end
@@ -436,10 +439,10 @@ end
 function EW.NextWorldMapSize()
   local db = EW.Database()
   local sizes = EW.WORLD_MAP_SIZES
-  if db.worldMapHidden then
+  if not db.worldMapOn then
     EW.SetWorldMapSize(sizes[1])
   elseif EW.WorldMapSize() >= sizes[#sizes] then
-    db.worldMapHidden = true
+    db.worldMapOn = nil
     EW.RefreshWorldMap()
   else
     EW.SetWorldMapSize(Step(true))
@@ -459,10 +462,10 @@ function EW.PinsCommand(rest)
   local word = string.lower(tostring(rest or "")):gsub("^%s+", ""):gsub("%s+$", "")
   word = word:gsub("^size%s*", ""):gsub("%%$", "")
   if word == "off" or word == "on" then
-    db.worldMapHidden = word == "off" and true or nil
+    db.worldMapOn = word == "on" and true or nil
     EW.RefreshWorldMap()
-    EW.Print(word == "off" and "The places are off the world map. /ewow pins puts them back."
-      or "The places are on the world map. Click one to plan a route there.")
+    EW.Print(word == "off" and "The places are off the world map. /ewow pins puts them on it."
+      or "The places are on the world map. Click one to start a route there, then click where to go.")
   elseif word ~= "" then
     local percent = tonumber(word)
     if word == "smaller" or word == "small" then percent = Step(false) end
@@ -474,12 +477,12 @@ function EW.PinsCommand(rest)
     EW.SetWorldMapSize(percent)
     EW.Print(string.format("The places on the world map are drawn at %d%%.", EW.WorldMapSize()))
   else
-    db.worldMapHidden = not db.worldMapHidden and true or nil
+    db.worldMapOn = not db.worldMapOn and true or nil
     EW.RefreshWorldMap()
-    if db.worldMapHidden then
-      EW.Print("The places are off the world map. /ewow pins puts them back.")
+    if not db.worldMapOn then
+      EW.Print("The places are off the world map. /ewow pins puts them on it.")
     else
-      EW.Print("The places are on the world map. Click one to plan a route there.")
+      EW.Print("The places are on the world map. Click one to start a route there, then click where to go.")
     end
   end
   if EW.RefreshDotsButton then pcall(EW.RefreshDotsButton) end

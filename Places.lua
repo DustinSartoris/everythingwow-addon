@@ -345,7 +345,116 @@ function Places.Tiles(mapId)
   return tiles, width / height
 end
 
+--------------------------------------------------------------------------
+-- The ground itself: the minimap's pictures
+--------------------------------------------------------------------------
+
+-- The world is cut into squares this many yards a side, 64 by 64 of them
+-- to a continent, and the minimap has one picture for each square that has
+-- land in it. Square 32, 32 has the middle of the world at its corner.
+Places.TILE_YARDS = 1600 / 3
+-- The folder of each continent's pictures, by the number the client counts
+-- the continent under.
+Places.TILE_FOLDERS = { [0] = "azeroth", [1] = "kalimdor" }
+
+--[[ The number the client counts a continent's map under, as it does a
+     place in the world. ]]
+function Places.Instance(continentMap)
+  local instance = ToWorld(continentMap, 0.5, 0.5)
+  return instance
+end
+
+--[[ The squares of the ground that a part of a map covers: the first and
+     last column and the first and last row. x0, y0, x1 and y1 are the
+     part's corners on the map, each from 0 to 1. ]]
+function Places.TileRange(mapId, x0, y0, x1, y1)
+  local _, first = ToWorld(mapId, x0, y0)
+  local _, last = ToWorld(mapId, x1, y1)
+  if not first or not last then return nil end
+  local northA, westA = XY(first)
+  local northB, westB = XY(last)
+  local size = Places.TILE_YARDS
+  local columnA, columnB = 32 - westA / size, 32 - westB / size
+  local rowA, rowB = 32 - northA / size, 32 - northB / size
+  local function Clamp(value) return math.max(0, math.min(63, math.floor(value))) end
+  return Clamp(math.min(columnA, columnB)), Clamp(math.max(columnA, columnB)),
+    Clamp(math.min(rowA, rowB)), Clamp(math.max(rowA, rowB))
+end
+
+-- Where each square lies on each map, as { x0, y0, x1, y1 }.
+local tileBox = {}
+
+--[[ Where one square of the ground lies on a map: its two corners, each
+     from 0 to 1 and beyond where the square runs off the map. ]]
+function Places.TileBox(mapId, column, row)
+  local key = mapId * 4096 + column * 64 + row
+  local box = tileBox[key]
+  if box == nil then
+    box = false
+    local instance = Places.Instance(mapId)
+    local size = Places.TILE_YARDS
+    local near = instance and Vector((32 - row) * size, (32 - column) * size)
+    local far = instance and Vector((31 - row) * size, (31 - column) * size)
+    if near and far then
+      local x0, y0 = FromWorld(instance, near, mapId)
+      local x1, y1 = FromWorld(instance, far, mapId)
+      if x0 and x1 then
+        box = { math.min(x0, x1), math.min(y0, y1), math.max(x0, x1), math.max(y0, y1) }
+      end
+    end
+    tileBox[key] = box
+  end
+  if not box then return nil end
+  return box[1], box[2], box[3], box[4]
+end
+
+--[[ The square of the ground a place stands on: the continent's number,
+     the column and the row. ]]
+function Places.Tile(key)
+  local instance, world = Places.World(key)
+  if not instance then return nil end
+  local north, west = XY(world)
+  if not north then return nil end
+  local size = Places.TILE_YARDS
+  return instance, math.floor(32 - west / size), math.floor(32 - north / size)
+end
+
+--[[ The names a square's picture may go by, most likely first. The client
+     is asked for each in turn; which it answers to is not something an
+     addon can know beforehand. ]]
+function Places.TileNames(instance, column, row)
+  local folder = Places.TILE_FOLDERS[instance]
+  if not folder then return {} end
+  local names = {}
+  -- A table of the client's own file numbers, where one has been given.
+  local ids = EW.TERRAIN_IDS and EW.TERRAIN_IDS[instance]
+  local id = ids and ids[column * 64 + row]
+  if id then names[#names + 1] = id end
+  names[#names + 1] = string.format("world/minimaps/%s/map%02d_%02d.blp", folder, column, row)
+  names[#names + 1] = string.format("World\\Minimaps\\%s\\map%02d_%02d", folder, column, row)
+  if column < 10 or row < 10 then
+    names[#names + 1] = string.format("world/minimaps/%s/map%d_%d.blp", folder, column, row)
+  end
+  return names
+end
+
+--[[ The zone at a spot of a continent's map, as the planner's word for it,
+     or nil where the spot is sea or a zone the planner does not have. ]]
+function Places.ZoneAt(continentMap, x, y)
+  local found
+  pcall(function()
+    local info = C_Map.GetMapInfoAtPosition(continentMap, x, y)
+    if type(info) == "table" then found = Number(info.mapID) end
+  end)
+  if found and T then
+    if T.ZONE_MAPS[found] then return T.ZONE_MAPS[found] end
+    -- A city's own map stands for the city, not for a zone.
+    if T.CITY_MAPS[found] then return nil, T.CITY_MAPS[found] end
+  end
+  return nil
+end
+
 --[[ For the tests: forget what the client said before. ]]
 function Places.Forget()
-  mapInfo, continentOf, continents, worldOf, fits = {}, {}, nil, {}, {}
+  mapInfo, continentOf, continents, worldOf, fits, tileBox = {}, {}, nil, {}, {}, {}
 end

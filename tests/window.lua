@@ -22,7 +22,28 @@ return function(t)
       if key == "IsShown" then return function(self) return self.shown end end
       if key == "SetScript" then return function(self, which, handler) self.scripts[which] = handler end end
       if key == "SetPoint" then return function(self, ...) self.point = { ... } end end
-      if key == "SetTexture" then return function(self, texture) self.texture = texture end end
+      if key == "SetTexture" then
+        return function(self, texture)
+          -- With a stand in for the minimap's files, a file that is not
+          -- there is refused, as the client refuses it.
+          local files = rawget(_G, "EW_TEST_TILES")
+          if files and type(texture) == "string" and texture:lower():find("minimaps", 1, true) and not files(texture) then
+            self.texture = nil
+            return false
+          end
+          self.texture = texture
+          return true
+        end
+      end
+      if key == "GetTexture" then
+        return function(self)
+          if rawget(_G, "EW_TEST_TILES") then return self.texture end
+          return nil
+        end
+      end
+      if key == "GetEffectiveScale" then return function() return 1 end end
+      if key == "GetLeft" then return function(self) return self.left or 0 end end
+      if key == "GetTop" then return function(self) return self.top or 0 end end
       if key == "SetSize" then return function(self, width, height) self.size = { width, height } end end
       if key == "SetStartPoint" then return function(self, ...) self.startPoint = { ... } end end
       if key == "SetEndPoint" then return function(self, ...) self.endPoint = { ... } end end
@@ -169,16 +190,16 @@ return function(t)
   equal("and its name for the tooltip", orgrimmar.tipName, "Orgrimmar")
   equal("with what it is and where", orgrimmar.tipKind, "Capital, Durotar")
   equal("its picture is the addon's own dot", orgrimmar.scripts.OnEnter ~= nil and EW.MEDIA, "Interface\\AddOns\\EverythingWoW\\Media\\")
-  equal("the map says how to use it", map.hint.text, "Click a place to go there from where you stand. Right-click a place to start from it instead.")
+  equal("the map says how to use it", map.hint.text, "Click where you start, then where you want to go. Right-click: go there from where you stand. Wheel: zoom. Drag: move.")
   equal("and has a key of seven kinds of dot", #map.key, 7)
   equal("which begins with the capitals", map.key[1].text, "Capital")
 
-  -- A click on a place goes there from where the character stands.
+  -- A right-click on a place goes there from where the character stands.
   stub.state.map = 1454
   window.from:SetText("")
   window.to:SetText("")
-  map.pins.undercity.scripts.OnClick(map.pins.undercity, "LeftButton")
-  equal("a click on a place plans the trip there", window.heading.text, "Orgrimmar to Undercity (On foot)")
+  map.pins.undercity.scripts.OnClick(map.pins.undercity, "RightButton")
+  equal("a right-click on a place plans the trip there from where the character stands", window.heading.text, "Orgrimmar to Undercity (On foot)")
   equal("and writes its name in the To box", window.to.text, "Undercity")
   local drawn = EW.RouteAnswer("", "", nil, "place:undercity")
   check("the way is drawn, a line a step", map.routeShown >= 2 and map.routeShown <= #drawn.plan.steps, map.routeShown)
@@ -193,38 +214,55 @@ return function(t)
   equal("and says so", map.hereText.text, "You are here")
   equal("the From box's caption says where the trip starts", window.fromCaption.text, "From (where you stand: Orgrimmar)")
 
-  -- A right-click starts from the place.
-  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "RightButton")
-  equal("a right-click on a place starts the trip there", window.heading.text, "Booty Bay to Undercity (On foot)")
-  equal("and writes its name in the From box", window.from.text, "Booty Bay")
-  equal("the green ring moves to it", map.here.node, "place:bootybay")
+  -- The first click is where the trip starts, the second where it ends.
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "LeftButton")
+  equal("a click is where the trip starts", window.from.text, "Booty Bay")
+  equal("the trip before it is put away", window.to.text, "")
+  equal("the window says where from", window.heading.text, "From Booty Bay")
+  equal("and asks for the end", window.estimate.text, "Now click where you want to go.")
+  equal("no way is drawn yet", map.routeShown, 0)
+  equal("nor a gold ring", map.goal:IsShown(), false)
+  equal("the green ring moves to the start", map.here.node, "place:bootybay")
   equal("and is named the start", map.hereText.text, "Start")
   equal("the caption is plain once a start is picked", window.fromCaption.text, "From")
-
-  -- One place is never both ends.
+  equal("the end is waited for", EW.MapClickStage(), 1)
+  equal("no trip is in hand between the clicks", EW.trip, nil)
   map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "LeftButton")
-  equal("a click on the start makes it the destination", window.to.text, "Booty Bay")
-  equal("and the start goes back to where the character stands", window.from.text, "")
-  equal("so the trip is from there", window.heading.text, "Orgrimmar to Booty Bay (On foot)")
-  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "RightButton")
-  equal("a right-click on the destination makes it the start", window.from.text, "Booty Bay")
-  equal("and the destination is asked for again", window.to.text, "")
-  equal("in words", window.heading.text, "Click a place on the map, or type where you want to go.")
+  equal("the start clicked again is no trip, and the end is still waited for", window.heading.text, "From Booty Bay")
   map.pins.undercity.scripts.OnClick(map.pins.undercity, "LeftButton")
-  equal("the next click completes the trip", window.heading.text, "Booty Bay to Undercity (On foot)")
+  equal("the second click is where it ends, and the trip is planned", window.heading.text, "Booty Bay to Undercity (On foot)")
+  equal("its name is in the To box", window.to.text, "Undercity")
+  equal("the gold ring is on it", map.goal.node, "place:undercity")
+  equal("nothing is waited for", EW.MapClickStage(), 0)
+
+  -- A click after that starts a new trip.
+  map.pins.orgrimmar.scripts.OnClick(map.pins.orgrimmar, "LeftButton")
+  equal("a third click starts a new trip", window.heading.text, "From Orgrimmar")
+  equal("with the old end gone", window.to.text, "")
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "LeftButton")
+  equal("and the fourth ends it", window.heading.text, "Orgrimmar to Booty Bay (On foot)")
+
+  -- A right-click between the two clicks is still the short way.
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "LeftButton")
+  map.pins.undercity.scripts.OnClick(map.pins.undercity, "RightButton")
+  equal("a right-click drops the start that was clicked", window.from.text, "")
+  equal("and goes from where the character stands", window.heading.text, "Orgrimmar to Undercity (On foot)")
+  equal("with nothing waited for", EW.MapClickStage(), 0)
 
   -- Clear puts the window back as it opened.
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "LeftButton")
   click(window.clear)
   equal("Clear empties the From box", window.from.text, "")
   equal("and the To box", window.to.text, "")
   equal("and asks where to", window.heading.text, "Where to?")
+  equal("and how", window.estimate.text, "Click where you start, then where you want to go. Right-click a place to go there from where you stand.")
   equal("with no way drawn", map.routeShown, 0)
   equal("no gold ring", map.goal:IsShown(), false)
   equal("and the green ring back where the character stands", map.here.node, "place:orgrimmar")
-  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "RightButton")
-  map.pins.undercity.scripts.OnClick(map.pins.undercity, "LeftButton")
+  equal("a start that was waited on is forgotten", EW.MapClickStage(), 0)
 
   -- A zone's name can be picked too.
+  map.pins.bootybay.scripts.OnClick(map.pins.bootybay, "LeftButton")
   map.zones.westfall.scripts.OnClick(map.zones.westfall, "LeftButton")
   equal("a click on a zone's name goes to the zone", window.heading.text, "Booty Bay to Westfall (On foot)")
   equal("the ring is on the zone's middle", map.goal.node, "zone:westfall")
@@ -387,7 +425,7 @@ return function(t)
   equal("with no outline", lineless.window.map.lines, 0)
   check("but every dot", lineless.window.map.pins.orgrimmar ~= nil)
   local linelessMap = lineless.window.map
-  linelessMap.pins.undercity.scripts.OnClick(linelessMap.pins.undercity, "LeftButton")
+  linelessMap.pins.undercity.scripts.OnClick(linelessMap.pins.undercity, "RightButton")
   equal("a click still plans the trip", lineless.window.heading.text, "Orgrimmar to Undercity (On foot)")
   equal("and the ring still marks the destination", linelessMap.goal.node, "place:undercity")
   rawset(_G, "EW_TEST_NO_LINES", nil)
@@ -424,7 +462,7 @@ return function(t)
     near(realMap.here.point[4], 0.61 * mapWide) and near(realMap.here.point[5], -0.44 * mapHigh))
   equal("and says so", realMap.hereText.text, "You are here")
 
-  realMap.pins.ratchet.scripts.OnClick(realMap.pins.ratchet, "LeftButton")
+  realMap.pins.ratchet.scripts.OnClick(realMap.pins.ratchet, "RightButton")
   equal("a click on a place plans the trip there", real.window.heading.text, "Orgrimmar to Ratchet (On foot)")
   check("the way is drawn on the real map", realMap.routeShown >= 1, realMap.routeShown)
   local ratchetX, ratchetY = real.Places.Spot("ratchet", world.KALIMDOR)
@@ -440,7 +478,7 @@ return function(t)
   equal("a way that lies on the first continent is not drawn on the second", realMap.routeShown, 0)
   equal("nor the rings", realMap.goal:IsShown(), false)
   equal("the character is not on this continent, so no green ring", realMap.here:IsShown(), false)
-  realMap.pins.undercity.scripts.OnClick(realMap.pins.undercity, "LeftButton")
+  realMap.pins.undercity.scripts.OnClick(realMap.pins.undercity, "RightButton")
   equal("a click there plans the trip across the sea", real.window.heading.text, "Orgrimmar to Undercity (On foot)")
   equal("the gold ring marks it", realMap.goal.node, "place:undercity")
   click(realMap.tabs[1])
@@ -470,6 +508,214 @@ return function(t)
   equal("or on the other, if that was the one shown", realMap.continent, world.EASTERN)
   equal("still there", realMap:IsShown(), true)
   click(realMap.tabs[1])
+
+  -- On a client that does not give the ground's pictures, the map still zooms.
+  equal("this client gave no picture of the ground", real.terrain.ok, false)
+  check("and the status line says which was asked for",
+    real.TerrainReport():find("terrain map: off, the client gave no picture for world/minimaps/", 1, true) ~= nil, real.TerrainReport())
+  equal("so the map zooms no further than its own picture is worth", realMap.zoomMax, real.MAP_ZOOM_MAX_DRAWN)
+  realMap.zoomTo(100)
+  equal("the zoom stops there", realMap.zoom, real.MAP_ZOOM_MAX_DRAWN)
+  equal("with no square of the ground drawn", realMap.terrainShown, 0)
+  click(realMap.tabs[1])
+  equal("a continent's button shows it whole again", realMap.zoom, 1)
+
+  -- A client that gives the minimap's pictures of the ground.
+  local asked = {}
+  rawset(_G, "EW_TEST_TILES", function(name)
+    asked[#asked + 1] = name
+    if name:find("^world/minimaps/kalimdor/map%d%d_%d%d%.blp$") == nil then return false end
+    return name ~= "world/minimaps/kalimdor/map22_22.blp"
+  end)
+  local savedPointer = rawget(_G, "GetCursorPosition")
+  local pointerX, pointerY = nil, nil
+  rawset(_G, "GetCursorPosition", function() return pointerX, pointerY and -pointerY end)
+  local grounded = t.LoadFreshAddon(2, { "1.60.1", "70000", "Nov 4 2026", 16001 })
+  stub.state.map = 1454
+  grounded.SlashCommand("")
+  local gmap = grounded.window.map
+  check("the window's map is the real one", gmap ~= nil and gmap.real == true, tostring(grounded.realMapError))
+  equal("the client was asked for the square a capital stands on, and gave it", grounded.terrain.ok, true)
+  check("by its name in the minimap's folder", grounded.terrain.name:find("^world/minimaps/kalimdor/map%d%d_%d%d%.blp$") ~= nil, grounded.terrain.name)
+  check("and the status line says so", grounded.TerrainReport():find("terrain map: on (world/minimaps/kalimdor/", 1, true) ~= nil)
+  equal("so the map zooms all the way in", gmap.zoomMax, grounded.MAP_ZOOM_MAX)
+  equal("it opens on the whole continent", gmap.zoom, 1)
+  equal("where a square of the ground is too small to draw", gmap.terrainShown, 0)
+  local GP = grounded.Places
+  local orgX, orgY = GP.Spot("orgrimmar", world.KALIMDOR)
+
+  -- The wheel zooms about the pointer, or the middle where there is none.
+  gmap.scripts.OnMouseWheel(gmap, 1)
+  equal("a turn of the wheel zooms in by a step", gmap.zoom, 1.5)
+  check("about the middle of the window", near(gmap.offsetX, -(1.5 - 1) * mapWide / 2) and near(gmap.offsetY, -(1.5 - 1) * mapHigh / 2))
+  check("Orgrimmar's dot moves with the map",
+    near(gmap.pins.orgrimmar.point[4], orgX * mapWide * 1.5 + gmap.offsetX) and near(gmap.pins.orgrimmar.point[5], -(orgY * mapHigh * 1.5 + gmap.offsetY)))
+  local firstTile = gmap.sheets[world.KALIMDOR].tiles[1]
+  check("the continent's pictures grow with it", near(firstTile.size[1], 256 / 1002 * mapWide * 1.5) and near(firstTile.point[4], gmap.offsetX))
+  gmap.scripts.OnMouseWheel(gmap, -1)
+  equal("a turn back zooms out", gmap.zoom, 1)
+  check("to where it was", gmap.offsetX == 0 and gmap.offsetY == 0)
+  gmap.scripts.OnMouseWheel(gmap, -1)
+  equal("and no further than the whole continent", gmap.zoom, 1)
+  -- One step in, a square of the ground is still too small, however many
+  -- of them the window may hold.
+  local savedMost = grounded.TERRAIN_TILES_MAX
+  grounded.TERRAIN_TILES_MAX = 100000
+  gmap.zoomTo(1.5)
+  equal("a square narrower than it is worth drawing is not drawn", gmap.terrainShown, 0)
+  grounded.TERRAIN_TILES_MAX = savedMost
+  gmap.zoomTo(1)
+  pointerX, pointerY = orgX * mapWide, orgY * mapHigh
+  gmap.scripts.OnMouseWheel(gmap, 1)
+  gmap.scripts.OnMouseWheel(gmap, 1)
+  check("zooming with the pointer on Orgrimmar keeps Orgrimmar under the pointer",
+    near(gmap.pins.orgrimmar.point[4], pointerX) and near(gmap.pins.orgrimmar.point[5], -pointerY))
+  equal("two steps in", gmap.zoom, 2.25)
+
+  -- A dot that has run out of the window is put away.
+  local out, outKey = 0, nil
+  for key, pin in pairs(gmap.pins) do
+    local x, y = pin.point[4], -pin.point[5]
+    local inside = x >= -12 and x <= mapWide + 12 and y >= -12 and y <= mapHigh + 12
+    if not inside then out, outKey = out + 1, key end
+    if pin:IsShown() ~= inside then outKey = "wrong:" .. key end
+  end
+  check("zoomed in, some dots lie outside the window", out > 0, out)
+  check("and exactly those are put away", outKey ~= nil and not tostring(outKey):find("^wrong:"), outKey)
+  equal("Orgrimmar's, under the pointer, is shown", gmap.pins.orgrimmar:IsShown(), true)
+
+  -- Zoomed in far enough, the ground itself is drawn.
+  local shownTiles = 0
+  for _ in pairs(gmap.ground) do shownTiles = shownTiles + 1 end
+  check("at that zoom the ground's own pictures are drawn", gmap.terrainShown > 4 and gmap.terrainShown == shownTiles, gmap.terrainShown)
+  check("no more of them than the window holds", gmap.terrainShown <= grounded.TERRAIN_TILES_MAX)
+  local x0, y0 = -gmap.offsetX / (mapWide * gmap.zoom), -gmap.offsetY / (mapHigh * gmap.zoom)
+  local columnA, columnB, rowA, rowB = GP.TileRange(world.KALIMDOR, x0, y0, x0 + 1 / gmap.zoom, y0 + 1 / gmap.zoom)
+  local inRange, placed = true, true
+  for key, picture in pairs(gmap.ground) do
+    local column, row = picture.square[1], picture.square[2]
+    if key ~= column * 64 + row or column < columnA or column > columnB or row < rowA or row > rowB then inRange = false end
+    local bx0, by0, bx1, by1 = GP.TileBox(world.KALIMDOR, column, row)
+    if picture.texture ~= string.format("world/minimaps/kalimdor/map%02d_%02d.blp", column, row)
+      or not near(picture.point[4], bx0 * mapWide * gmap.zoom + gmap.offsetX)
+      or not near(picture.point[5], -(by0 * mapHigh * gmap.zoom + gmap.offsetY))
+      or not near(picture.size[1], (bx1 - bx0) * mapWide * gmap.zoom) or picture:IsShown() ~= true then
+      placed = false
+    end
+  end
+  check("each is a square in view", inRange)
+  check("each the client's own file, laid where the client says the square is", placed)
+  equal("a square is a third of 1,600 yards a side", GP.TILE_YARDS, 1600 / 3)
+  local bx0, _, bx1 = GP.TileBox(world.KALIMDOR, 30, 30)
+  check("which the stand in world makes a known part of the continent", near(bx1 - bx0, GP.TILE_YARDS / 10000))
+
+  -- A square with no picture, as the sea has none, is left to the map under it.
+  gmap.zoomTo(1)
+  gmap.zoomTo(2.25, (32 - 22 - 0.5) * GP.TILE_YARDS / 10000 * mapWide, (32 - 22 - 0.5) * GP.TILE_YARDS / 10000 * mapHigh)
+  check("the ground is drawn about the missing square", gmap.terrainShown > 4, gmap.terrainShown)
+  equal("but the missing square itself is not", gmap.ground[22 * 64 + 22], nil)
+  local asksBefore = #asked
+  gmap.moveTo(gmap.offsetX + 1, gmap.offsetY)
+  local again = 0
+  for index = asksBefore + 1, #asked do
+    if asked[index]:find("map22_22", 1, true) then again = again + 1 end
+  end
+  equal("and the client is not asked for it again at every move", again, 0)
+
+  -- Dragging moves the map; a click that was no drag picks the ground.
+  gmap.zoomTo(1)
+  gmap.zoomTo(2.25)
+  local beforeX, beforeY = gmap.offsetX, gmap.offsetY
+  pointerX, pointerY = 300, 200
+  gmap.scripts.OnMouseDown(gmap, "LeftButton")
+  pointerX, pointerY = 260, 180
+  gmap.scripts.OnUpdate(gmap)
+  check("a drag moves the map with the pointer", near(gmap.offsetX, beforeX - 40) and near(gmap.offsetY, beforeY - 20))
+  gmap.scripts.OnMouseUp(gmap, "LeftButton")
+  equal("and letting go after a drag picks nothing", grounded.MapClickStage(), 0)
+  equal("the drag is over", gmap.scripts.OnUpdate, nil)
+  gmap.moveTo(5000, 5000)
+  check("the map cannot be dragged past its own corner", gmap.offsetX == 0 and gmap.offsetY == 0)
+  gmap.moveTo(-50000, -50000)
+  check("nor past the far one", near(gmap.offsetX, mapWide - mapWide * 2.25) and near(gmap.offsetY, mapHigh - mapHigh * 2.25))
+  gmap.zoomTo(1)
+  local durotar, barrens = world.rect[grounded.Places.ZoneMap("durotar")], world.rect[grounded.Places.ZoneMap("barrens")]
+  equal("the client names the zone at a spot", GP.ZoneAt(world.KALIMDOR, (durotar[1] + durotar[3]) / 2, (durotar[2] + durotar[4]) / 2), "durotar")
+  equal("and none in the sea", GP.ZoneAt(world.KALIMDOR, 0.001, 0.999), nil)
+  pointerX, pointerY = (durotar[1] + durotar[3]) / 2 * mapWide, (durotar[2] + durotar[4]) / 2 * mapHigh
+  gmap.scripts.OnMouseDown(gmap, "LeftButton")
+  gmap.scripts.OnMouseUp(gmap, "LeftButton")
+  equal("a click on the ground starts the trip in the zone there", grounded.window.heading.text, "From Durotar")
+  pointerX, pointerY = barrens[1] * mapWide + 3, barrens[2] * mapHigh + 3
+  local second = GP.ZoneAt(world.KALIMDOR, pointerX / mapWide, pointerY / mapHigh)
+  gmap.scripts.OnMouseDown(gmap, "LeftButton")
+  gmap.scripts.OnMouseUp(gmap, "LeftButton")
+  equal("and a second click ends it in the zone there", grounded.trip and grounded.trip.to, "zone:" .. tostring(second))
+  pointerX, pointerY = 0.001 * mapWide, 0.999 * mapHigh
+  equal("a click on the sea picks nothing", gmap.clickAt(pointerX, pointerY, "LeftButton"), false)
+
+  -- A press that only trembles is still a click, and a click on a zoomed
+  -- map picks what is under the pointer there.
+  grounded.WindowClear()
+  local middleX, middleY = (durotar[1] + durotar[3]) / 2, (durotar[2] + durotar[4]) / 2
+  gmap.zoomTo(1.5)
+  pointerX, pointerY = middleX * mapWide * gmap.zoom + gmap.offsetX, middleY * mapHigh * gmap.zoom + gmap.offsetY
+  check("the zone's middle has moved in the window, and is still in it",
+    math.abs(pointerX - middleX * mapWide) > 5 and pointerX > 0 and pointerX < mapWide and pointerY > 0 and pointerY < mapHigh, pointerX)
+  gmap.scripts.OnMouseDown(gmap, "LeftButton")
+  pointerX = pointerX + 2
+  gmap.scripts.OnUpdate(gmap)
+  gmap.scripts.OnMouseUp(gmap, "LeftButton")
+  equal("a click on the zoomed map picks the zone under the pointer", grounded.window.heading.text, "From Durotar")
+  grounded.WindowClear()
+  gmap.zoomTo(1)
+
+  -- Where the client names a city's own map at a spot, the city is picked.
+  local savedAt = _G.C_Map.GetMapInfoAtPosition
+  _G.C_Map.GetMapInfoAtPosition = function() return { mapID = 1454 } end
+  local zoneThere, cityThere = GP.ZoneAt(world.KALIMDOR, 0.5, 0.5)
+  check("a city's map is the city, not a zone", zoneThere == nil and cityThere == "orgrimmar", tostring(zoneThere) .. " " .. tostring(cityThere))
+  gmap.clickAt(10, 10, "LeftButton")
+  equal("and a click there starts the trip in the city", grounded.window.heading.text, "From Orgrimmar")
+  _G.C_Map.GetMapInfoAtPosition = savedAt
+  grounded.WindowClear()
+  pointerX, pointerY = barrens[1] * mapWide + 3, barrens[2] * mapHigh + 3
+  grounded.WindowClear()
+  gmap.scripts.OnMouseDown(gmap, "RightButton")
+  gmap.scripts.OnMouseUp(gmap, "RightButton")
+  equal("a right-click on the ground goes there from where the character stands",
+    grounded.window.heading.text, "Orgrimmar to " .. grounded.TRAVEL.ZONES[second].name .. " (On foot)")
+
+  -- The green ring is a button: start where the character stands.
+  grounded.WindowClear()
+  check("the ring on the character can be clicked", gmap.hereButton ~= nil and gmap.hereButton:IsShown())
+  gmap.hereButton.scripts.OnClick(gmap.hereButton, "LeftButton")
+  equal("a click on it starts the trip where the character stands", grounded.window.heading.text, "From where you stand")
+  gmap.pins.ratchet.scripts.OnClick(gmap.pins.ratchet, "LeftButton")
+  equal("and the next click ends it", grounded.window.heading.text, "Orgrimmar to Ratchet (On foot)")
+  equal("such a trip follows the character", grounded.trip.here, true)
+  gmap.pins.ratchet.scripts.OnClick(gmap.pins.ratchet, "LeftButton")
+  equal("with a start picked the ring on the character is no button", gmap.hereButton:IsShown(), false)
+  grounded.WindowClear()
+
+  -- The two buttons zoom for a player with no wheel.
+  pointerX, pointerY = nil, nil
+  click(gmap.zoomIn)
+  equal("the plus button zooms in a step", gmap.zoom, 1.5)
+  click(gmap.zoomOut)
+  equal("and the minus button out", gmap.zoom, 1)
+  gmap.zoomTo(1000, orgX * mapWide, orgY * mapHigh)
+  equal("the zoom stops at its largest", gmap.zoom, grounded.MAP_ZOOM_MAX)
+  check("where only a square or two of the ground is in view", gmap.terrainShown >= 1 and gmap.terrainShown <= 6, gmap.terrainShown)
+  click(gmap.tabs[2])
+  equal("the other continent opens whole", gmap.zoom, 1)
+  equal("with none of the first one's ground", gmap.terrainShown, 0)
+  for _, own in ipairs({ "Show", "Hide", "IsShown", "SetPoint", "SetSize", "SetScript", "SetScale", "GetScale", "GetLeft", "GetTop", "GetWidth", "GetHeight" }) do
+    check("the zooming map keeps nothing under the frame's own " .. own, rawget(gmap, own) == nil)
+  end
+  rawset(_G, "EW_TEST_TILES", nil)
+  rawset(_G, "GetCursorPosition", savedPointer)
+  stub.state.printed = {}
 
   -- A client whose pictures do not fill their rows gets the drawn map.
   world.files = 11

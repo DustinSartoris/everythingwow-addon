@@ -92,7 +92,18 @@ local window, windowFailed = nil, false
 local page, stepPage = "route", 1
 local answer = nil
 -- The places picked on the map, as the planner's own nodes.
-local picks = { from = nil, to = nil }
+local picks = { from = nil, to = nil, stage = 0 }
+-- stage is 1 between the two clicks of a trip: the start has been clicked
+-- and the end is waited for.
+
+-- How the map zooms: each turn of the wheel by this much, up to this many
+-- times the whole continent, and the ground's own pictures once one of
+-- their squares is this many pixels wide.
+EW.MAP_ZOOM_STEP = 1.5
+EW.MAP_ZOOM_MAX = 48
+EW.MAP_ZOOM_MAX_DRAWN = 6
+EW.TERRAIN_TILE_PIXELS = 64
+EW.TERRAIN_TILES_MAX = 160
 
 --------------------------------------------------------------------------
 -- What the pages show, as plain values, so the tests can read them
@@ -327,6 +338,11 @@ local function DrawRoute()
     if from then x, y = map.pixelOf(from) end
     PlaceMarker(map, map.here, x, y, from)
   end
+  -- The ring on the character can be clicked to start there; the ring on a
+  -- picked start cannot.
+  if map.hereButton then
+    if hereX then map.hereButton:Show() else map.hereButton:Hide() end
+  end
   local goalX, goalY
   if to then goalX, goalY = map.pixelOf(to) end
   PlaceMarker(map, map.goal, goalX, goalY, to)
@@ -362,10 +378,14 @@ local function RefreshRoute()
   local pages = math.max(1, math.ceil(#steps / perPage))
   if stepPage > pages then stepPage = pages end
   if stepPage < 1 then stepPage = 1 end
-  if not answer then
+  if not answer and picks.stage == 1 then
+    local start = picks.from and EW.Travel and EW.Travel.NodeName(picks.from) or "where you stand"
+    frame.heading:SetText("From " .. start)
+    frame.estimate:SetText("Now click where you want to go.")
+  elseif not answer then
     frame.heading:SetText("Where to?")
     if frame.map then
-      frame.estimate:SetText("Click a place on the map to go there from where you stand.")
+      frame.estimate:SetText("Click where you start, then where you want to go. Right-click a place to go there from where you stand.")
     else
       frame.estimate:SetText("Leave From empty to start where you stand.")
     end
@@ -422,6 +442,7 @@ local function RefreshRecorded()
   local reports = {}
   if EW.FlightReport then reports[#reports + 1] = EW.FlightReport() end
   if EW.RideReport then reports[#reports + 1] = EW.RideReport() end
+  if EW.TerrainReport and EW.VersionKey() == "forever" then reports[#reports + 1] = EW.TerrainReport() end
   frame.travel:SetText(table.concat(reports, "\n"))
 end
 
@@ -504,9 +525,57 @@ function EW.WindowPick(node, mouseButton)
   Plan()
 end
 
+--[[
+A click on the map, as on any map of roads: the first click is where the
+trip starts and the second is where it ends, and the trip is planned at the
+second. A click after that starts a new trip. node is a place or a zone, or
+"here" for where the character stands. A right-click is the short way: go
+to that place from where the character stands.
+]]
+function EW.MapClick(node, mouseButton)
+  if type(node) ~= "string" then return end
+  local function Box(which, text)
+    if window then pcall(function() window[which]:SetText(text) end) end
+  end
+  if mouseButton == "RightButton" then
+    if node == "here" then return end
+    picks.from, picks.stage = nil, 0
+    Box("from", "")
+    EW.WindowPick(node, "LeftButton")
+    return
+  end
+  if picks.stage == 1 then
+    -- The second click. The start clicked again is no trip, so it is waited on.
+    if node == "here" then return end
+    if picks.from == node then return end
+    picks.stage = 0
+    EW.WindowPick(node, "LeftButton")
+    return
+  end
+  -- The first click.
+  picks.stage, picks.to = 1, nil
+  Box("to", "")
+  if node == "here" then
+    picks.from = nil
+    Box("from", "")
+  else
+    picks.from = node
+    Box("from", (EW.Travel and EW.Travel.NodeName(node)) or "")
+  end
+  answer = nil
+  stepPage = 1
+  Refresh()
+  Tell()
+end
+
+--[[ For the tests and the tooltips: 1 while the end of a trip is waited for. ]]
+function EW.MapClickStage()
+  return picks.stage
+end
+
 --[[ Empties both ends and the answer: the window as it first opened. ]]
 function EW.WindowClear()
-  picks.from, picks.to = nil, nil
+  picks.from, picks.to, picks.stage = nil, nil, 0
   answer = nil
   stepPage = 1
   if window then
@@ -525,7 +594,12 @@ local function ShowMapTip(owner)
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     GameTooltip:SetText(owner.tipName, 1, 1, 1)
     if owner.tipKind then GameTooltip:AddLine(owner.tipKind, 0.9, 0.8, 0.5) end
-    GameTooltip:AddLine("Click to go here. Right-click to start here.", 0.7, 0.7, 0.7)
+    if picks.stage == 1 then
+      GameTooltip:AddLine("Click to go here.", 0.7, 0.7, 0.7)
+    else
+      GameTooltip:AddLine("Click to start here, then click where to go.", 0.7, 0.7, 0.7)
+      GameTooltip:AddLine("Right-click to go here from where you stand.", 0.7, 0.7, 0.7)
+    end
     GameTooltip:Show()
   end)
 end
@@ -535,7 +609,7 @@ local function HideMapTip() pcall(function() GameTooltip:Hide() end) end
 local function Pickable(button, node, name, kind)
   button.node, button.tipName, button.tipKind = node, name, kind
   pcall(function() button:RegisterForClicks("LeftButtonUp", "RightButtonUp") end)
-  button:SetScript("OnClick", function(self, mouseButton) pcall(EW.WindowPick, self.node, mouseButton) end)
+  button:SetScript("OnClick", function(self, mouseButton) pcall(EW.MapClick, self.node, mouseButton) end)
   button:SetScript("OnEnter", ShowMapTip)
   button:SetScript("OnLeave", HideMapTip)
 end
@@ -636,17 +710,77 @@ local function FinishMap(map)
 
   local hint = map:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   hint:SetPoint("BOTTOMLEFT", map, "BOTTOMLEFT", 6, 6)
-  hint:SetText("Click a place to go there from where you stand. Right-click a place to start from it instead.")
+  hint:SetText("Click where you start, then where you want to go. Right-click: go there from where you stand. Wheel: zoom. Drag: move.")
   map.hint = hint
 end
 
+--[[ Asks the client for one square of the ground's pictures, by each of the
+     names it may go by. True where the texture took one. ]]
+local terrainFailed = {}
+local function LoadTile(texture, instance, column, row)
+  local key = instance * 4096 + column * 64 + row
+  if terrainFailed[key] then return false end
+  for _, name in ipairs(EW.Places.TileNames(instance, column, row)) do
+    local answered, got
+    pcall(function() texture:SetTexture(nil) end)
+    local ok = pcall(function() answered = texture:SetTexture(name) end)
+    pcall(function() got = texture:GetTexture() end)
+    if ok and answered ~= false and got ~= nil then return true, name end
+  end
+  terrainFailed[key] = true
+  return false
+end
+
 --[[
-The game's own map, a continent at a time. The pictures are the client's
-own, asked for by the continent's number and laid out as the client lays
-them out; every place is a dot where the client says the place is, and the
-green ring is where the character really stands. A button for each
-continent sits in the corner. Returns nil where the client cannot give
-the pictures or cannot place the zones, and the drawn map is used instead.
+Whether this client gives an addon the minimap's pictures of the ground. One
+square is asked for, the one a capital stands on, which every client that
+has the pictures has. EW.terrain says what came of it: { ok, name }, name
+being the name that worked or the first one tried.
+]]
+function EW.TerrainProbe(texture)
+  if EW.terrain then return EW.terrain.ok end
+  local P, T = EW.Places, EW.TRAVEL
+  local result = { ok = false }
+  if P and T and texture then
+    for _, place in ipairs(T.PLACES) do
+      if place.kind == "capital_city" then
+        local instance, column, row = P.Tile(place.key)
+        if instance then
+          local ok, name = LoadTile(texture, instance, column, row)
+          result.ok = ok
+          result.name = name or P.TileNames(instance, column, row)[1]
+          terrainFailed[instance * 4096 + column * 64 + row] = nil
+          pcall(function() texture:SetTexture(nil) end)
+          break
+        end
+      end
+    end
+  end
+  EW.terrain = result
+  return result.ok
+end
+
+--[[ One line for /ewow status: whether the window's map can show the
+     ground itself. ]]
+function EW.TerrainReport()
+  local terrain = EW.terrain
+  if not terrain then return "terrain map: not tried yet (open the window on WoW Forever)" end
+  if terrain.ok then return "terrain map: on (" .. tostring(terrain.name) .. ")" end
+  return "terrain map: off, the client gave no picture for " .. tostring(terrain.name or "any square")
+end
+
+--[[
+The game's own map, a continent at a time, that can be zoomed and moved.
+The whole continent is the game's own picture of it, asked for by the
+continent's number and laid out as the client lays it out. Zoomed in far
+enough, the ground itself is drawn over that: the pictures the minimap is
+made of, a square at a time, for the squares in view. Every place is a dot
+where the client says the place is, and the green ring is where the
+character really stands. The wheel zooms about the pointer, a drag moves
+the map, and a button for each continent sits in the corner. A click on a
+dot, a zone's name or the ground picks it. Returns nil where the client
+cannot give the continent's pictures or cannot place the zones, and the
+drawn map is used instead.
 ]]
 local function BuildRealMap(frame, left, top, width, height)
   local T, P = EW.TRAVEL, EW.Places
@@ -660,31 +794,51 @@ local function BuildRealMap(frame, left, top, width, height)
     tilesOf[continent.map] = tiles
   end
 
-  local map = CreateFrame("Frame", nil, frame)
-  map:SetSize(width, height)
-  map:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
-  pcall(function() map:SetClipsChildren(true) end)
+  -- The window on the map: what runs past its edge is cut off. The map
+  -- itself fills it and holds everything drawn.
+  local clip = CreateFrame("Frame", nil, frame)
+  clip:SetSize(width, height)
+  clip:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
+  pcall(function() clip:SetClipsChildren(true) end)
+  local map = CreateFrame("Frame", nil, clip)
+  map:SetAllPoints(clip)
   local sea = map:CreateTexture(nil, "BACKGROUND", nil, -8)
   sea:SetAllPoints(map)
   sea:SetColorTexture(0.04, 0.07, 0.11, 1)
   map.real = true
+  map.clip = clip
   map.lines, map.route, map.sheets, map.tabs = 0, {}, {}, {}
   map.pins, map.zones = {}, {}
+  map.zoom, map.offsetX, map.offsetY = 1, 0, 0
+  map.terrainShown = 0
 
   local baseLevel = 1
   pcall(function() baseLevel = map:GetFrameLevel() + 1 end)
 
+  -- Whether the ground's own pictures can be had is asked once.
+  local probe = map:CreateTexture(nil, "BACKGROUND", nil, -7)
+  probe:Hide()
+  local terrain = EW.TerrainProbe(probe)
+  local zoomMax = terrain and EW.MAP_ZOOM_MAX or EW.MAP_ZOOM_MAX_DRAWN
+  map.zoomMax = zoomMax
+
+  --[[ Where a spot of the continent, each from 0 to 1, lies in the window
+       at the zoom and place the map is at. ]]
+  local function Pixel(x, y)
+    return x * width * map.zoom + map.offsetX, y * height * map.zoom + map.offsetY
+  end
+
   --[[ One continent's sheet: its pictures, its dots and its names, made
-       the first time the continent is shown. ]]
+       the first time the continent is shown. Each remembers where on the
+       continent it lies, so it can be put again when the map is zoomed. ]]
   local function Sheet(continent)
     local sheet = map.sheets[continent.map]
     if sheet then return sheet end
     sheet = { map = continent.map, tiles = {}, pins = {}, zones = {} }
     for _, tile in ipairs(tilesOf[continent.map]) do
       local picture = map:CreateTexture(nil, "BACKGROUND", nil, 1)
-      picture:SetSize(tile.width * width, tile.height * height)
-      picture:SetPoint("TOPLEFT", map, "TOPLEFT", tile.left * width, -tile.top * height)
       picture:SetTexture(tile.file)
+      picture.spot = tile
       sheet.tiles[#sheet.tiles + 1] = picture
     end
     local taken = {}
@@ -692,7 +846,9 @@ local function BuildRealMap(frame, left, top, width, height)
       local x, y, estimated = P.Spot(place.key, continent.map)
       if x then
         local style = PIN_STYLES[place.kind] or PIN_STYLES.landmark
-        sheet.pins[place.key] = MakePin(map, place, x * width, y * height, baseLevel, estimated)
+        local pin = MakePin(map, place, x * width, y * height, baseLevel, estimated)
+        pin.spot = { x, y }
+        sheet.pins[place.key] = pin
         taken[#taken + 1] = { x * width, y * height, style.size + 2, style.size + 2 }
       end
     end
@@ -700,7 +856,9 @@ local function BuildRealMap(frame, left, top, width, height)
       local x, y = P.ZoneSpot(key, continent.map)
       if x then
         local nameX, nameY = EW.MapNameSpot(taken, x * width, y * height, T.ZONES[key].name)
-        sheet.zones[key] = MakeZoneName(map, key, nameX, nameY, baseLevel)
+        local name = MakeZoneName(map, key, nameX, nameY, baseLevel)
+        name.spot = { nameX / width, nameY / height }
+        sheet.zones[key] = name
       end
     end
     map.sheets[continent.map] = sheet
@@ -715,9 +873,107 @@ local function BuildRealMap(frame, left, top, width, height)
     end
   end
 
-  --[[ Shows one continent and puts the others away. It must not be named
-       Show: that is the frame's own, which the window calls to bring the
-       whole map back when the Route page is returned to. ]]
+  -- The ground's pictures in view, by square, and the ones waiting for use.
+  local ground, spare = {}, {}
+
+  --[[ Draws the squares of the ground that are in view, where the map is
+       zoomed in far enough for them, and puts the rest away. ]]
+  local function DrawTerrain()
+    local keep, count = {}, 0
+    local zoom = map.zoom
+    local instance = terrain and map.continent and P.Instance(map.continent)
+    local left0, _, right0 = P.TileBox(map.continent, 32, 32)
+    if instance and left0 and (right0 - left0) * width * zoom >= EW.TERRAIN_TILE_PIXELS then
+      local x0, y0 = -map.offsetX / (width * zoom), -map.offsetY / (height * zoom)
+      local columnA, columnB, rowA, rowB = P.TileRange(map.continent, x0, y0, x0 + 1 / zoom, y0 + 1 / zoom)
+      if columnA and (columnB - columnA + 1) * (rowB - rowA + 1) <= EW.TERRAIN_TILES_MAX then
+        for column = columnA, columnB do
+          for row = rowA, rowB do
+            local key = column * 64 + row
+            local bx0, by0, bx1, by1 = P.TileBox(map.continent, column, row)
+            local picture = ground[key]
+            if bx0 and not picture then
+              picture = table.remove(spare) or map:CreateTexture(nil, "BACKGROUND", nil, 2)
+              if LoadTile(picture, instance, column, row) then
+                ground[key] = picture
+              else
+                picture:Hide()
+                spare[#spare + 1] = picture
+                picture = nil
+              end
+            end
+            if bx0 and picture then
+              local x, y = Pixel(bx0, by0)
+              picture:SetSize((bx1 - bx0) * width * zoom, (by1 - by0) * height * zoom)
+              picture:ClearAllPoints()
+              picture:SetPoint("TOPLEFT", map, "TOPLEFT", x, -y)
+              picture:Show()
+              picture.square = { column, row }
+              keep[key] = true
+              count = count + 1
+            end
+          end
+        end
+      end
+    end
+    for key, picture in pairs(ground) do
+      if not keep[key] then
+        picture:Hide()
+        spare[#spare + 1] = picture
+        ground[key] = nil
+      end
+    end
+    map.terrainShown, map.ground = count, ground
+  end
+
+  --[[ Puts everything of the continent shown where the zoom and the place
+       of the map have it. ]]
+  local function Layout()
+    local sheet = map.sheets[map.continent]
+    if not sheet then return end
+    local zoom = map.zoom
+    for _, picture in ipairs(sheet.tiles) do
+      local tile = picture.spot
+      local x, y = Pixel(tile.left, tile.top)
+      picture:SetSize(tile.width * width * zoom, tile.height * height * zoom)
+      picture:ClearAllPoints()
+      picture:SetPoint("TOPLEFT", map, "TOPLEFT", x, -y)
+    end
+    for _, list in ipairs({ sheet.pins, sheet.zones }) do
+      for _, widget in pairs(list) do
+        local x, y = Pixel(widget.spot[1], widget.spot[2])
+        widget:ClearAllPoints()
+        widget:SetPoint("CENTER", map, "TOPLEFT", x, -y)
+        -- A dot outside the window is put away, so it cannot be clicked there.
+        if x >= -12 and x <= width + 12 and y >= -12 and y <= height + 12 then widget:Show() else widget:Hide() end
+      end
+    end
+    pcall(DrawTerrain)
+    pcall(DrawRoute)
+  end
+  map.layout = Layout
+
+  --[[ Zooms to a size, keeping the spot under a point of the window where
+       it is; with no point, the middle. ]]
+  function map.zoomTo(zoom, pointX, pointY)
+    zoom = math.max(1, math.min(zoomMax, zoom))
+    pointX, pointY = pointX or width / 2, pointY or height / 2
+    local x = (pointX - map.offsetX) / (width * map.zoom)
+    local y = (pointY - map.offsetY) / (height * map.zoom)
+    map.zoom = zoom
+    map.moveTo(pointX - x * width * zoom, pointY - y * height * zoom)
+  end
+
+  --[[ Moves the map so its corner is at a point, never past its own edge. ]]
+  function map.moveTo(offsetX, offsetY)
+    map.offsetX = math.max(width - width * map.zoom, math.min(0, offsetX))
+    map.offsetY = math.max(height - height * map.zoom, math.min(0, offsetY))
+    Layout()
+  end
+
+  --[[ Shows one continent, whole, and puts the others away. It must not be
+       named Show: that is the frame's own, which the window calls to bring
+       the whole map back when the Route page is returned to. ]]
   function map.showContinent(continentMap)
     local chosen
     for _, continent in ipairs(continents) do
@@ -728,28 +984,86 @@ local function BuildRealMap(frame, left, top, width, height)
     local sheet = Sheet(chosen)
     ShowSheet(sheet, true)
     map.continent, map.pins, map.zones = chosen.map, sheet.pins, sheet.zones
+    map.zoom, map.offsetX, map.offsetY = 1, 0, 0
     for _, tab in ipairs(map.tabs) do
       pcall(function()
         if tab.continent == chosen.map then tab:LockHighlight() else tab:UnlockHighlight() end
       end)
     end
-    pcall(DrawRoute)
+    Layout()
     return true
   end
 
   function map.pixelOf(node)
     local x, y = P.NodeSpot(node, map.continent)
     if not x then return nil end
-    return x * width, y * height
+    return Pixel(x, y)
   end
 
   function map.playerPixel()
     local x, y = P.Player(map.continent)
     if not x then return nil end
-    return x * width, y * height
+    return Pixel(x, y)
   end
 
-  -- A button for each continent, in the top left corner.
+  --[[ Where the pointer is in the window on the map, in its own pixels
+       from its top left corner, or nil where the client will not say. ]]
+  local function Pointer()
+    local x, y
+    pcall(function()
+      local cursorX, cursorY = GetCursorPosition()
+      local scale = map:GetEffectiveScale()
+      x, y = cursorX / scale - map:GetLeft(), map:GetTop() - cursorY / scale
+    end)
+    if type(x) ~= "number" or type(y) ~= "number" or x ~= x or y ~= y then return nil end
+    return x, y
+  end
+  map.pointer = Pointer
+
+  --[[ A click on the ground: the zone there, or the city. ]]
+  function map.clickAt(pointX, pointY, mouseButton)
+    local x = (pointX - map.offsetX) / (width * map.zoom)
+    local y = (pointY - map.offsetY) / (height * map.zoom)
+    local zone, city = P.ZoneAt(map.continent, x, y)
+    local node = (zone and ("zone:" .. zone)) or (city and ("place:" .. city)) or nil
+    if not node then return false end
+    EW.MapClick(node, mouseButton)
+    return true
+  end
+
+  -- The wheel zooms about the pointer; a drag moves the map; a click that
+  -- was no drag picks what is under it.
+  pcall(function()
+    map:EnableMouse(true)
+    map:EnableMouseWheel(true)
+    map:SetScript("OnMouseWheel", function(_, delta)
+      local pointX, pointY = Pointer()
+      local step = (tonumber(delta) or 0) > 0 and EW.MAP_ZOOM_STEP or 1 / EW.MAP_ZOOM_STEP
+      pcall(map.zoomTo, map.zoom * step, pointX, pointY)
+    end)
+    map:SetScript("OnMouseDown", function(self, mouseButton)
+      local pointX, pointY = Pointer()
+      if not pointX then return end
+      self.drag = { x = pointX, y = pointY, offsetX = map.offsetX, offsetY = map.offsetY, moved = false, button = mouseButton }
+      if mouseButton ~= "LeftButton" then return end
+      self:SetScript("OnUpdate", function()
+        local drag = self.drag
+        local nowX, nowY = Pointer()
+        if not drag or not nowX then return end
+        if math.abs(nowX - drag.x) + math.abs(nowY - drag.y) > 4 then drag.moved = true end
+        if drag.moved then pcall(map.moveTo, drag.offsetX + nowX - drag.x, drag.offsetY + nowY - drag.y) end
+      end)
+    end)
+    map:SetScript("OnMouseUp", function(self, mouseButton)
+      local drag = self.drag
+      self.drag = nil
+      self:SetScript("OnUpdate", nil)
+      if drag and not drag.moved then pcall(map.clickAt, drag.x, drag.y, mouseButton) end
+    end)
+  end)
+
+  -- A button for each continent, in the top left corner, and the two that
+  -- zoom for a player with no wheel.
   local tabLeft = 6
   for _, continent in ipairs(continents) do
     local tab = CreateFrame("Button", nil, map, "UIPanelButtonTemplate")
@@ -763,8 +1077,29 @@ local function BuildRealMap(frame, left, top, width, height)
     map.tabs[#map.tabs + 1] = tab
     tabLeft = tabLeft + tabWidth + 4
   end
+  local function ZoomButton(label, offset, step)
+    local button = CreateFrame("Button", nil, map, "UIPanelButtonTemplate")
+    button:SetSize(22, 20)
+    button:SetPoint("TOPRIGHT", map, "TOPRIGHT", offset, -6)
+    button:SetText(label)
+    pcall(function() button:SetFrameLevel(baseLevel + 20) end)
+    button:SetScript("OnClick", function() pcall(map.zoomTo, map.zoom * step) end)
+    return button
+  end
+  map.zoomIn = ZoomButton("+", -6, EW.MAP_ZOOM_STEP)
+  map.zoomOut = ZoomButton("-", -30, 1 / EW.MAP_ZOOM_STEP)
 
   FinishMap(map)
+
+  -- The green ring can be clicked: start where the character stands.
+  pcall(function()
+    local hereButton = CreateFrame("Button", nil, map)
+    hereButton:SetSize(22, 22)
+    hereButton:SetPoint("CENTER", map.here, "CENTER", 0, 0)
+    pcall(function() hereButton:SetFrameLevel(baseLevel + 12) end)
+    Pickable(hereButton, "here", "You are here", nil)
+    map.hereButton = hereButton
+  end)
 
   -- Open on the continent the character is on.
   local first = P.PlayerContinent()

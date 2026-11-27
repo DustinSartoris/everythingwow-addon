@@ -229,9 +229,9 @@ return function(t)
   -- /ewow pins with no world map changes the setting and breaks nothing.
   stub.state.printed = {}
   bare.SlashCommand("pins")
-  equal("/ewow pins is kept with no world map to draw on", bare.Database().worldMapHidden, true)
+  equal("/ewow pins is kept with no world map to draw on", bare.Database().worldMapOn, true)
   bare.SlashCommand("pins")
-  equal("and undone the same way", bare.Database().worldMapHidden, nil)
+  equal("and undone the same way", bare.Database().worldMapOn, nil)
   equal("each says what it did", #stub.state.printed, 2)
 
   --------------------------------------------------------------------
@@ -296,8 +296,18 @@ return function(t)
     return count
   end
 
-  -- A zone's map shows every place in it.
+  -- The game's own map is left alone until the player asks.
   worldMap.mapId = zoneMap.durotar
+  worldMap:OnMapChanged()
+  equal("the sheet follows the map", layer.mapId, zoneMap.durotar)
+  equal("but a new player's world map has no marks on it", layer.pinsShown, 0)
+  equal("and the window's button would say so", mapped.WorldMapDotsLabel(), "World Map Dots: Off")
+  stub.state.printed = {}
+  mapped.SlashCommand("pins")
+  equal("/ewow pins puts the places on it", mapped.Database().worldMapOn, true)
+  check("and says how to use them", stub.state.printed[1]:find("Click one to start a route there, then click where to go.", 1, true) ~= nil)
+
+  -- A zone's map shows every place in it.
   worldMap:OnMapChanged()
   equal("the map says it has changed and the sheet is drawn for it", layer.mapId, zoneMap.durotar)
   local durotarCount, durotarFirst = Expected(zoneMap.durotar)
@@ -426,8 +436,8 @@ return function(t)
   equal("no trip yet, so no way is drawn", layer.routeShown, 0)
   equal("and no ring", layer.goal:IsShown(), false)
   local ratchet = PinOf("ratchet")
-  ratchet.scripts.OnClick(ratchet, "LeftButton")
-  check("a click on a dot plans the trip there", mapped.trip and mapped.trip.ok, mapped.trip and mapped.trip.message)
+  ratchet.scripts.OnClick(ratchet, "RightButton")
+  check("a right-click on a mark plans the trip there", mapped.trip and mapped.trip.ok, mapped.trip and mapped.trip.message)
   equal("from where the character stands", mapped.trip.title, "Orgrimmar to Ratchet (On foot)")
   check("the way is drawn on the world map", layer.routeShown >= 1, layer.routeShown)
   local ratchetX, ratchetY = P.Spot("ratchet", world.KALIMDOR)
@@ -458,10 +468,14 @@ return function(t)
   equal("with the ring on it", layer.goal.node, "place:wailing-caverns")
   equal("one dot more than the continent shows by itself", layer.pinsShown, continentCount + 1)
 
-  -- A right-click starts the trip there.
+  -- A click is where the trip starts, and the next click where it ends.
   local crossroads = PinOf("the-crossroads")
-  crossroads.scripts.OnClick(crossroads, "RightButton")
-  equal("a right-click on a dot starts the trip there", mapped.trip.from, "place:the-crossroads")
+  crossroads.scripts.OnClick(crossroads, "LeftButton")
+  equal("a click on a mark is where the trip starts", mapped.MapClickStage(), 1)
+  equal("no trip is planned until the second click", mapped.trip, nil)
+  equal("the world map draws no way between the two clicks", layer.routeShown, 0)
+  mapped.MapClick("place:wailing-caverns", "LeftButton")
+  equal("the second click plans the trip from the first", mapped.trip.from, "place:the-crossroads")
   equal("the green ring marks the picked start", layer.start.node, "place:the-crossroads")
   equal("and is shown", layer.start:IsShown(), true)
   equal("no line follows the character then", layer.follow, nil)
@@ -484,7 +498,7 @@ return function(t)
   equal("/ewow pins takes the dots off the world map", Shown(), 0)
   equal("and the way", layer.routeShown, 0)
   equal("and the rings", layer.goal:IsShown(), false)
-  check("and says how to put them back", stub.state.printed[#stub.state.printed]:find("/ewow pins puts them back", 1, true) ~= nil)
+  check("and says how to put them back", stub.state.printed[#stub.state.printed]:find("/ewow pins puts them on it", 1, true) ~= nil)
   check("the trip itself is kept", mapped.trip ~= nil and mapped.trip.ok and mapped.tracker:IsShown())
   worldMap:OnMapChanged()
   equal("another map shows none either", Shown(), 0)
@@ -525,6 +539,7 @@ return function(t)
   rawset(_G, "EW_TEST_NO_LINES", true)
   local lineless = t.LoadFreshAddon(2, FOREVER)
   worldMap.mapId = world.KALIMDOR
+  lineless.Database().worldMapOn = true
   lineless.RefreshWorldMap()
   local linelessLayer = lineless.worldMapLayer
   check("without line drawing the sheet is still laid", linelessLayer ~= nil, lineless.worldMapError)
@@ -565,7 +580,7 @@ return function(t)
   equal("/ewow tracker says where the tracker works", stub.state.printed[1]:match(": (.+)$"), "The route tracker covers WoW Forever only.")
   retail.SlashCommand("pins")
   equal("/ewow pins likewise", stub.state.printed[2]:match(": (.+)$"), "The places on the world map cover WoW Forever only.")
-  equal("and neither is saved", retail.Database().trackerHidden == nil and retail.Database().worldMapHidden == nil, true)
+  equal("and neither is saved", retail.Database().trackerHidden == nil and retail.Database().worldMapOn == nil, true)
 
   for _, toc in ipairs({ "EverythingWoW.toc", "EverythingWoW_Vanilla.toc" }) do
     local handle = assert(io.open(t.root .. toc, "r"))
